@@ -95,7 +95,8 @@ export type DroppedReason =
   | "not_allowlisted"
   | "out_of_range"
   | "not_in_url_list"
-  | "failed_fetch";
+  | "failed_fetch"
+  | "irrelevant";
 
 export type DroppedSource = {
   url: string;

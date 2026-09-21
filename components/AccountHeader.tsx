@@ -40,7 +40,7 @@ export function AccountHeader({
 
   return (
     <div className="flex items-center gap-3">
-      <span className="font-mono text-[11px] text-muted">
+      <span className="hidden font-mono text-[11px] text-muted md:inline">
         {user.credits} credit{user.credits === 1 ? "" : "s"}
       </span>
       {stripeEnabled && (
@@ -48,7 +48,7 @@ export function AccountHeader({
           type="button"
           onClick={buy}
           disabled={busy}
-          className="border border-line px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:border-line-strong hover:text-ink disabled:opacity-40"
+          className="hidden border border-line px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:border-line-strong hover:text-ink disabled:opacity-40 md:inline"
         >
           {busy ? "Checkout" : "Buy credits"}
         </button>

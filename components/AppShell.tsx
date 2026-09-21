@@ -10,8 +10,8 @@ export function AppShell({
   trailing?: ReactNode;
 }) {
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-canvas text-ink">
-      <header className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-5 py-2">
+    <div className="flex h-dvh flex-col overflow-hidden bg-canvas text-ink">
+      <header className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-3 py-2 md:px-5">
         <div className="flex items-center gap-3">
           <Link href="/" className="text-[13px] font-medium tracking-[0.2em]">
             ASTRONOTES

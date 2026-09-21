@@ -43,6 +43,7 @@ Rules:
 - prefer 8–12 strategic relationships: founding roles, operating roles, funds they run, and signature investments with a named round or date. Skip laundry-list portfolio names from one "including X and Y" sentence
 - sourceUrl must be the most independent document in this payload that states the fact. Prefer wikipedia.org, britannica.com, .gov, and major news over the subject's own website, YouTube, retailers, and Goodreads
 - evidenceSnippet must be a short quote copied from that same document's text, not a page title or nav chrome
+- if subjects are provided, ignore documents that are not about those people, companies, or products
 - do not extract fictional characters, TV plot, or satire as real-world involvement unless the query is about that work
 - do not only emit high-confidence PR facts; include announcement-only claims and conflict or absence claims when the documents support them
 - if the same pair has both an announcement and a weaker operational claim, extract both with distinct types and matching status
@@ -73,6 +74,7 @@ export type ExtractionContext = {
   preferExistingLinks?: boolean;
   allowNewEntities?: boolean;
   gaps?: string[];
+  subjects?: string[];
 };
 
 export async function extractKnowledge(
@@ -98,6 +100,7 @@ export async function extractKnowledge(
     : EXTRACTION_PROMPT;
   const payload = {
     query,
+    subjects: context.subjects ?? [],
     gaps: context.gaps ?? [],
     documents: rankSearchResults(documents).map((doc) => ({
       title: doc.title,

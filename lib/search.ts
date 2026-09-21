@@ -13,7 +13,7 @@ import type { DroppedSource, SearchProvider, SearchResult, SourcePolicy } from "
 const MAX_RESULTS = 12;
 const PAGE_TIMEOUT_MS = 4000;
 const PAGE_CHAR_LIMIT = 2400;
-const FETCH_COUNT = 6;
+const FETCH_COUNT = 8;
 const TAVILY_TIMEOUT_MS = 15000;
 const TAVILY_QUERY_LIMIT = 400;
 const MIN_PAGE_CHARS = 40;
@@ -121,6 +121,10 @@ const SEARCH_WRAPPERS = [
   /\bhow are\b/gi,
   /\bconnected on\b/gi,
   /\band which\b/gi,
+  /\bi'?m interested in (learning more about|knowing more about|learning about)\b/gi,
+  /\bi want to (know|learn|understand|find out) (more )?(about )?/gi,
+  /\btell me (more )?about\b/gi,
+  /\bcan you (find|research|look up|tell me)\b/gi,
 ];
 
 export function compactSearchQuery(question: string): string {
@@ -304,6 +308,19 @@ function finishSearch(
     results: rankSearchResults(policy.results).slice(0, MAX_RESULTS),
     provider,
     dropped: policy.dropped,
+    recovered,
+  };
+}
+
+export function mergeSearchOutcomes(outcomes: SearchOutcome[]): SearchOutcome {
+  const collected = outcomes.flatMap((outcome) => outcome.results);
+  const dropped = outcomes.flatMap((outcome) => outcome.dropped);
+  const recovered = outcomes.some((outcome) => outcome.recovered);
+  const withHits = outcomes.find((outcome) => outcome.results.length > 0);
+  return {
+    results: rankSearchResults(mergeResults(collected)).slice(0, 16),
+    provider: withHits?.provider ?? outcomes[0]?.provider ?? "mock",
+    dropped,
     recovered,
   };
 }

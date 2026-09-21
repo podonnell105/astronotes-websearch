@@ -42,6 +42,7 @@ import {
   FILTERS_OPEN_KEY,
   GRAPH_CHROME_OPEN_KEY,
   SEARCH_OPEN_KEY,
+  useIsPhone,
   usePersistentBoolean,
 } from "@/lib/uiPrefs";
 import dynamic from "next/dynamic";
@@ -55,6 +56,7 @@ const KnowledgeGraph = dynamic(
 
 type Status = "idle" | "running" | "complete" | "error";
 type MainView = "graph" | "claims";
+type PhonePane = "graph" | "claims" | "chat";
 
 function applyView(session: SessionView) {
   return {
@@ -133,11 +135,13 @@ export function ResearchWorkspace({
   const [chatMessages, setChatMessages] = useState<ChatTurn[]>(seeded?.chat ?? []);
   const [queryLoading, setQueryLoading] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
-  const [view, setView] = useState<MainView>(
+  const desktopDefaultView: MainView =
     seeded && seeded.status === "complete" && seeded.relationships.length > 0
       ? "claims"
-      : "graph",
-  );
+      : "graph";
+  const [view, setView] = useState<MainView>("graph");
+  const [phonePane, setPhonePane] = useState<PhonePane>("graph");
+  const isPhone = useIsPhone();
   const [frozenAt, setFrozenAt] = useState<number | null>(seeded?.frozenAt ?? null);
   const [createdAt, setCreatedAt] = useState<number | null>(
     initialSession?.createdAt ?? null,
@@ -172,6 +176,14 @@ export function ResearchWorkspace({
     policyRef.current = sourcePolicy;
   }, [sourcePolicy]);
 
+  useEffect(() => {
+    if (isPhone) {
+      setView("graph");
+      return;
+    }
+    if (desktopDefaultView === "claims") setView("claims");
+  }, [desktopDefaultView, isPhone]);
+
   const resetGraph = () => {
     setEntities([]);
     setRelationships([]);
@@ -190,6 +202,7 @@ export function ResearchWorkspace({
     setQueryError(null);
     setError(null);
     setElapsedMs(null);
+    setPhonePane("graph");
     setFrozenAt(null);
     setView("graph");
     runStartedAtRef.current = null;
@@ -592,6 +605,8 @@ export function ResearchWorkspace({
 
   const accountUser = user ? { ...user, credits } : null;
   const asOfStamp = frozenAt ?? createdAt;
+  const phoneChat = isPhone && phonePane === "chat" && !readOnly;
+  const showClaims = isPhone ? phonePane === "claims" : view === "claims";
 
   return (
     <AppShell
@@ -609,8 +624,10 @@ export function ResearchWorkspace({
               {sourcePolicyActive(sourcePolicy) ? " · Sources" : ""}
             </button>
           )}
-          <ModeBadge mode={mode} jevStatus={jevStatus} />
-          <ResearchStatus status={status} elapsedMs={elapsedMs} />
+          <div className="hidden md:contents">
+            <ModeBadge mode={mode} jevStatus={jevStatus} />
+            <ResearchStatus status={status} elapsedMs={elapsedMs} />
+          </div>
           {accountUser && !readOnly && (
             <AccountHeader user={accountUser} stripeEnabled={stripeEnabled} />
           )}
@@ -631,49 +648,79 @@ export function ResearchWorkspace({
         </div>
       ) : (
         <>
-          {searchOpen && !readOnly && (
-            <div className="shrink-0 border-b border-line px-4 py-2">
-              <SearchBar
-                query={query}
-                onQuery={setQuery}
-                onSubmit={runResearch}
-                disabled={status === "running"}
-                compact
-                onNewGraph={startNewGraph}
-                onCollapse={() => setSearchOpen(false)}
-                policy={sourcePolicy}
-                onPolicy={setSourcePolicy}
-                availableDataSources={availableDataSources}
-              />
-              {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
-            </div>
-          )}
-          {!searchOpen && !readOnly && error && (
-            <p className="shrink-0 border-b border-line px-4 py-2 text-[12px] text-danger">
-              {error}
-            </p>
-          )}
-          {searchOpen && readOnly && (
-            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-line px-4 py-3">
-              <div className="min-w-0">
-                <div className="label">Shared evidence pack</div>
-                <p className="mt-1 text-[13px] text-ink">{query}</p>
-                <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
-                  {formatSourcePolicy(sourcePolicy)}
-                  {droppedSources.length > 0 ? ` · Dropped ${droppedSources.length}` : ""}
-                </p>
+          <div className="hidden md:block">
+            {searchOpen && !readOnly && (
+              <div className="shrink-0 border-b border-line px-4 py-2">
+                <SearchBar
+                  query={query}
+                  onQuery={setQuery}
+                  onSubmit={runResearch}
+                  disabled={status === "running"}
+                  compact
+                  onNewGraph={startNewGraph}
+                  onCollapse={() => setSearchOpen(false)}
+                  policy={sourcePolicy}
+                  onPolicy={setSourcePolicy}
+                  availableDataSources={availableDataSources}
+                />
+                {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
               </div>
-              <button
-                type="button"
-                onClick={() => setSearchOpen(false)}
-                className="border border-line px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:border-line-strong hover:text-ink"
-                title="Hide pack details"
+            )}
+            {!searchOpen && !readOnly && error && (
+              <p className="shrink-0 border-b border-line px-4 py-2 text-[12px] text-danger">
+                {error}
+              </p>
+            )}
+            {searchOpen && readOnly && (
+              <div className="flex shrink-0 items-start justify-between gap-3 border-b border-line px-4 py-3">
+                <div className="min-w-0">
+                  <div className="label">Shared evidence pack</div>
+                  <p className="mt-1 text-[13px] text-ink">{query}</p>
+                  <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+                    {formatSourcePolicy(sourcePolicy)}
+                    {droppedSources.length > 0 ? ` · Dropped ${droppedSources.length}` : ""}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSearchOpen(false)}
+                  className="border border-line px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:border-line-strong hover:text-ink"
+                  title="Hide pack details"
+                >
+                  Hide
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2 md:hidden">
+            <ToolbarToggle
+              active={phonePane === "graph"}
+              onClick={() => {
+                setPhonePane("graph");
+                setView("graph");
+              }}
+            >
+              Graph
+            </ToolbarToggle>
+            <ToolbarToggle
+              active={phonePane === "claims"}
+              onClick={() => {
+                setPhonePane("claims");
+                setView("claims");
+              }}
+            >
+              Claims
+            </ToolbarToggle>
+            {!readOnly && (
+              <ToolbarToggle
+                active={phonePane === "chat"}
+                onClick={() => setPhonePane("chat")}
               >
-                Hide
-              </button>
-            </div>
-          )}
-          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2">
+                Chat
+              </ToolbarToggle>
+            )}
+          </div>
+          <div className="hidden shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2 md:flex">
             <ToolbarToggle active={view === "graph"} onClick={() => setView("graph")}>
               Graph
             </ToolbarToggle>
@@ -742,7 +789,23 @@ export function ResearchWorkspace({
             )}
           </div>
           <div className="flex min-h-0 flex-1">
-            <div className="relative min-h-0 min-w-0 flex-1">
+            {phoneChat && (
+              <div className="min-h-0 min-w-0 flex-1 md:hidden">
+                <ChatPanel
+                  disabled={status === "running" || !sessionId || entities.length === 0}
+                  onAsk={askGraph}
+                  messages={chatMessages}
+                  loading={queryLoading}
+                  error={queryError}
+                  entities={entities}
+                  selectedEntityId={selectedEntityId}
+                  selectedRelationshipId={selectedRelationshipId}
+                  onSelectEdge={(id) => selectRelationship(id)}
+                  onSelectEntity={selectEntity}
+                />
+              </div>
+            )}
+            <div className={`relative min-h-0 min-w-0 flex-1 ${phoneChat ? "hidden md:block" : ""}`}>
               {entities.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
                   {status === "running" && (
@@ -761,7 +824,7 @@ export function ResearchWorkspace({
                     </p>
                   )}
                 </div>
-              ) : view === "claims" ? (
+              ) : showClaims ? (
                 <ClaimTable
                   entities={entities}
                   relationships={relationships}
@@ -772,14 +835,15 @@ export function ResearchWorkspace({
                   onSelect={(id) => {
                     selectRelationship(id);
                     setView("graph");
+                    setPhonePane("graph");
                   }}
-                  filtersOpen={filtersOpen}
+                  filtersOpen={!isPhone && filtersOpen}
                   onToggleFilters={() => setFiltersOpen(false)}
                 />
               ) : (
                 <>
                   {status === "running" && (
-                    <div className={`pointer-events-none absolute right-4 z-10 flex items-center gap-3 border border-line bg-panel/90 px-3 py-2 ${graphChromeOpen ? "top-12" : "top-4"}`}>
+                    <div className={`pointer-events-none absolute right-4 z-10 hidden items-center gap-3 border border-line bg-panel/90 px-3 py-2 md:flex ${graphChromeOpen ? "top-12" : "top-4"}`}>
                       <PixelComposeMotif />
                       <div>
                         <div className="label">Composing</div>
@@ -790,7 +854,7 @@ export function ResearchWorkspace({
                     </div>
                   )}
                   {status === "complete" && elapsedMs != null && (
-                    <div className={`pointer-events-none absolute right-4 z-10 border border-line bg-panel/90 px-3 py-2 font-mono text-[11px] text-dim ${graphChromeOpen ? "top-12" : "top-4"}`}>
+                    <div className={`pointer-events-none absolute right-4 z-10 hidden border border-line bg-panel/90 px-3 py-2 font-mono text-[11px] text-dim md:block ${graphChromeOpen ? "top-12" : "top-4"}`}>
                       {formatElapsed(elapsedMs)}
                     </div>
                   )}
@@ -811,56 +875,62 @@ export function ResearchWorkspace({
                       setFocusedRelationshipIds([]);
                       setExpanded(false);
                     }}
-                    chromeOpen={graphChromeOpen}
+                    chromeOpen={!isPhone && graphChromeOpen}
                     onToggleChrome={() => setGraphChromeOpen(false)}
                   />
-                  <EntityInfoPanel
-                    entity={entities.find((e) => e.id === selectedEntityId) ?? null}
-                    entities={entities}
-                    relationships={relationships}
-                    selectedRelationshipId={selectedRelationshipId}
-                    evidence={selectedEvidence}
-                    onClose={() => selectEntity(null)}
-                    onSelectConnection={selectRelationship}
-                  />
+                  <div className="hidden md:block">
+                    <EntityInfoPanel
+                      entity={entities.find((e) => e.id === selectedEntityId) ?? null}
+                      entities={entities}
+                      relationships={relationships}
+                      selectedRelationshipId={selectedRelationshipId}
+                      evidence={selectedEvidence}
+                      onClose={() => selectEntity(null)}
+                      onSelectConnection={selectRelationship}
+                    />
+                  </div>
                 </>
               )}
             </div>
-            {!readOnly &&
-              (chatOpen ? (
-                <div className="h-full w-[340px] shrink-0">
-                  <ChatPanel
-                    disabled={status === "running" || !sessionId || entities.length === 0}
-                    onAsk={askGraph}
-                    messages={chatMessages}
-                    loading={queryLoading}
-                    error={queryError}
-                    entities={entities}
-                    selectedEntityId={selectedEntityId}
-                    selectedRelationshipId={selectedRelationshipId}
-                    onSelectEdge={(id) => selectRelationship(id)}
-                    onSelectEntity={selectEntity}
-                    onCollapse={() => setChatOpen(false)}
-                  />
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setChatOpen(true)}
-                  className="flex h-full w-9 shrink-0 flex-col items-center justify-center border-l border-line bg-panel text-muted hover:text-ink"
-                  title="Show chat"
-                >
-                  <span className="label [writing-mode:vertical-rl] rotate-180">Ask</span>
-                </button>
-              ))}
+            <div className="hidden h-full shrink-0 md:block">
+              {!readOnly &&
+                (chatOpen ? (
+                  <div className="h-full w-[340px]">
+                    <ChatPanel
+                      disabled={status === "running" || !sessionId || entities.length === 0}
+                      onAsk={askGraph}
+                      messages={chatMessages}
+                      loading={queryLoading}
+                      error={queryError}
+                      entities={entities}
+                      selectedEntityId={selectedEntityId}
+                      selectedRelationshipId={selectedRelationshipId}
+                      onSelectEdge={(id) => selectRelationship(id)}
+                      onSelectEntity={selectEntity}
+                      onCollapse={() => setChatOpen(false)}
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setChatOpen(true)}
+                    className="flex h-full w-9 flex-col items-center justify-center border-l border-line bg-panel text-muted hover:text-ink"
+                    title="Show chat"
+                  >
+                    <span className="label [writing-mode:vertical-rl] rotate-180">Ask</span>
+                  </button>
+                ))}
+            </div>
           </div>
-          <ResearchFeed
-            events={logs}
-            stats={stats}
-            sources={sources}
-            collapsed={!feedOpen}
-            onToggle={() => setFeedOpen((open) => !open)}
-          />
+          <div className="hidden md:block">
+            <ResearchFeed
+              events={logs}
+              stats={stats}
+              sources={sources}
+              collapsed={!feedOpen}
+              onToggle={() => setFeedOpen((open) => !open)}
+            />
+          </div>
         </>
       )}
     </AppShell>

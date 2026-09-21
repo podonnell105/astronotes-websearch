@@ -13,12 +13,13 @@ import {
 import { addEntity, addRelationship } from "./graph";
 import { classifyClaims, toValidation } from "./jev";
 import { fetchPrimaryRecords, harvestOrgNames } from "./primarySources";
+import { filterRelevantResults } from "./relevance";
 import {
   fetchRelevantPages,
+  mergeSearchOutcomes,
   nameOnlySearchQuery,
   rankKnownEntities,
   searchWeb,
-  strategicSearchQuery,
   type Document,
 } from "./search";
 import { emptySourcePolicy, hostIsDenied, mergeDropped, normalizeSourcePolicy, summarizeDropped } from "./sources";
@@ -108,24 +109,23 @@ export async function runResearch(
       })),
     );
 
-    let searchQuery = nextQuery;
     let allowNewEntities = !preferExistingLinks;
     let gaps: string[] = [];
-    if (extending) {
-      log(emit, session, "Extending the graph...");
-      const neighborhood = buildNeighborhood(
-        nextQuery,
-        existingEntities,
-        existingRelationships,
-      );
-      const plan = await planResearch(nextQuery, neighborhood, preferExistingLinks);
-      searchQuery = plan.searchQuery;
-      allowNewEntities = plan.allowNewEntities;
-      gaps = plan.gaps;
-      log(emit, session, `Searching for: ${searchQuery}`);
-    } else {
-      searchQuery = strategicSearchQuery(nextQuery);
-      log(emit, session, `Searching for: ${searchQuery}`);
+    let subjects: string[] = [];
+    if (extending) log(emit, session, "Extending the graph...");
+    const neighborhood = extending
+      ? buildNeighborhood(nextQuery, existingEntities, existingRelationships)
+      : [];
+    const plan = await planResearch(nextQuery, neighborhood, preferExistingLinks);
+    allowNewEntities = plan.allowNewEntities;
+    gaps = plan.gaps;
+    subjects = plan.subjects;
+    const searchQueries = plan.queries.length ? plan.queries : [plan.searchQuery];
+    if (searchQueries.length > 1) {
+      log(emit, session, `Planned ${searchQueries.length} focused searches`);
+    }
+    for (const query of searchQueries) {
+      log(emit, session, `Searching for: ${query}`);
     }
 
     if (runtime.search === "mock") {
@@ -151,14 +151,22 @@ export async function runResearch(
         policy,
       });
 
-    let { results, provider, dropped, recovered } = await runSearch(searchQuery);
+    let { results, provider, dropped, recovered } = mergeSearchOutcomes(
+      await Promise.all(searchQueries.map((query) => runSearch(query))),
+    );
     recordDropped(session, emit, dropped);
+    const relevant = filterRelevantResults(results, subjects);
+    if (relevant.dropped.length > 0 && relevant.results.length > 0) {
+      recordDropped(session, emit, relevant.dropped);
+      results = relevant.results;
+      log(emit, session, `Kept ${results.length} sources about ${subjects[0] || "the subject"}`);
+    }
     if (results.length === 0 && !extending && !policy.onlyUrls.length) {
       log(emit, session, "No sources — broadening search");
-      ({ results, provider, dropped, recovered } = await runSearch(
-        nameOnlySearchQuery(nextQuery),
-        true,
-      ));
+      const fallbackQuery = subjects[0]
+        ? `"${subjects[0]}"`
+        : nameOnlySearchQuery(nextQuery);
+      ({ results, provider, dropped, recovered } = await runSearch(fallbackQuery, true));
       recordDropped(session, emit, dropped);
     }
     if (recovered) {
@@ -243,6 +251,7 @@ export async function runResearch(
         preferExistingLinks: extending && !allowNewEntities,
         allowNewEntities: extending ? allowNewEntities : undefined,
         gaps,
+        subjects,
       },
       runtime.search !== "mock" ? (message) => log(emit, session, message) : undefined,
     );
@@ -260,12 +269,20 @@ export async function runResearch(
       runtime.search !== "mock"
     ) {
       log(emit, session, "No claims from first sources — broadening search");
-      const more = await runSearch(nameOnlySearchQuery(nextQuery), true);
+      const more = await runSearch(
+        subjects[0] ? `"${subjects[0]}"` : nameOnlySearchQuery(nextQuery),
+        true,
+      );
       recordDropped(session, emit, more.dropped);
       if (more.recovered) {
         log(emit, session, "Few sources — merged OpenAI web search");
       }
       if (more.results.length > 0) {
+        const extraRelevant = filterRelevantResults(more.results, subjects);
+        if (extraRelevant.dropped.length > 0 && extraRelevant.results.length > 0) {
+          recordDropped(session, emit, extraRelevant.dropped);
+          more.results = extraRelevant.results;
+        }
         const extra = await fetchRelevantPages(more.results);
         recordFailedFetches(session, emit, extra.failed);
         const extraDocs = usableDocuments(extra.documents, extra.failed);
@@ -281,6 +298,7 @@ export async function runResearch(
             preferExistingLinks: false,
             allowNewEntities: true,
             gaps,
+            subjects,
           },
           (message) => log(emit, session, message),
         );
@@ -555,6 +573,7 @@ async function extractFromDocuments(
     preferExistingLinks?: boolean;
     allowNewEntities?: boolean;
     gaps?: string[];
+    subjects?: string[];
   },
   onGroundedDrop?: (message: string) => void,
 ): Promise<Extraction> {
@@ -568,6 +587,7 @@ async function extractFromDocuments(
     preferExistingLinks: context.preferExistingLinks,
     allowNewEntities: context.allowNewEntities,
     gaps: context.gaps,
+    subjects: context.subjects,
   });
   if (!onGroundedDrop) {
     extracted.relationships = recitesBetterEvidence(

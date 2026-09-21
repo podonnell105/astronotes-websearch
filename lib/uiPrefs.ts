@@ -19,6 +19,22 @@ function readStoredBoolean(key: string, fallback: boolean) {
   return fallback;
 }
 
+const PHONE_QUERY = "(max-width: 767px)";
+
+export function useIsPhone() {
+  const [isPhone, setIsPhone] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia(PHONE_QUERY);
+    const update = () => setIsPhone(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  return isPhone;
+}
+
 export function usePersistentBoolean(key: string, fallback = true) {
   const [value, setValue] = useState(fallback);
   const [ready, setReady] = useState(false);
