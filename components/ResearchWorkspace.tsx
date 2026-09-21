@@ -1,15 +1,20 @@
 "use client";
 
-import { PixelComposeMotif, formatElapsed } from "@/components/PixelComposeMotif";
+import { AccountHeader } from "@/components/AccountHeader";
 import { AppShell } from "@/components/AppShell";
 import { ChatPanel } from "@/components/ChatPanel";
+import { ClaimTable } from "@/components/ClaimTable";
 import { EntityInfoPanel } from "@/components/EntityInfoPanel";
 import { ModeBadge, ResearchStatus } from "@/components/ModeBadge";
+import { PixelComposeMotif, formatElapsed } from "@/components/PixelComposeMotif";
 import { ResearchFeed } from "@/components/ResearchFeed";
 import { SearchBar } from "@/components/SearchBar";
-import { DEMO_QUERY } from "@/lib/demo";
+import { buildPackCsv, buildPackMarkdown } from "@/lib/pack";
+import { formatAsOf } from "@/lib/claims";
 import { hasResearchIntent } from "@/lib/researchIntent";
+import { DEFAULT_QUERY } from "@/lib/templates";
 import type {
+  AuthUser,
   ChatTurn,
   Entity,
   EvidenceRecord,
@@ -18,9 +23,11 @@ import type {
   ResearchEvent,
   RuntimeMode,
   SearchResult,
+  SessionView,
   Validation,
 } from "@/lib/types";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const KnowledgeGraph = dynamic(
@@ -29,35 +36,98 @@ const KnowledgeGraph = dynamic(
 );
 
 type Status = "idle" | "running" | "complete" | "error";
+type MainView = "graph" | "claims";
 
-export function ResearchWorkspace() {
-  const [query, setQuery] = useState(DEMO_QUERY);
-  const [started, setStarted] = useState(false);
-  const [status, setStatus] = useState<Status>("idle");
-  const [mode, setMode] = useState<RuntimeMode | null>(null);
-  const [jevStatus, setJevStatus] = useState<"jev" | "mock">("mock");
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [entities, setEntities] = useState<Entity[]>([]);
-  const [relationships, setRelationships] = useState<Relationship[]>([]);
-  const [validations, setValidations] = useState<Record<string, Validation>>({});
-  const [evidence, setEvidence] = useState<Record<string, EvidenceRecord>>({});
-  const [sources, setSources] = useState<SearchResult[]>([]);
-  const [logs, setLogs] = useState<Extract<ResearchEvent, { type: "log" }>[]>([]);
-  const [stats, setStats] = useState({ sources: 0, entities: 0, relationships: 0 });
+function applyView(session: SessionView) {
+  return {
+    query: session.query,
+    started: true,
+    status: session.status as Status,
+    mode: session.mode,
+    jevStatus: session.jevStatus,
+    sessionId: session.id,
+    entities: session.entities,
+    relationships: session.relationships,
+    validations: session.validations,
+    evidence: session.evidence,
+    sources: session.sources,
+    logs: session.logs,
+    stats: session.stats,
+    chat: session.chat,
+    frozenAt: session.frozenAt ?? session.createdAt,
+  };
+}
+
+export function ResearchWorkspace({
+  user,
+  stripeEnabled = false,
+  initialSession = null,
+  initialQuery,
+  autoStart = false,
+  readOnly = false,
+}: {
+  user?: AuthUser | null;
+  stripeEnabled?: boolean;
+  initialSession?: SessionView | null;
+  initialQuery?: string;
+  autoStart?: boolean;
+  readOnly?: boolean;
+}) {
+  const router = useRouter();
+  const seeded = initialSession ? applyView(initialSession) : null;
+  const [query, setQuery] = useState(seeded?.query ?? initialQuery ?? DEFAULT_QUERY);
+  const [started, setStarted] = useState(Boolean(seeded));
+  const [status, setStatus] = useState<Status>(seeded?.status ?? "idle");
+  const [mode, setMode] = useState<RuntimeMode | null>(seeded?.mode ?? null);
+  const [jevStatus, setJevStatus] = useState<"jev" | "mock">(seeded?.jevStatus ?? "mock");
+  const [sessionId, setSessionId] = useState<string | null>(seeded?.sessionId ?? null);
+  const [entities, setEntities] = useState<Entity[]>(seeded?.entities ?? []);
+  const [relationships, setRelationships] = useState<Relationship[]>(
+    seeded?.relationships ?? [],
+  );
+  const [validations, setValidations] = useState<Record<string, Validation>>(
+    seeded?.validations ?? {},
+  );
+  const [evidence, setEvidence] = useState<Record<string, EvidenceRecord>>(
+    seeded?.evidence ?? {},
+  );
+  const [sources, setSources] = useState<SearchResult[]>(seeded?.sources ?? []);
+  const [logs, setLogs] = useState<Extract<ResearchEvent, { type: "log" }>[]>(
+    seeded?.logs ?? [],
+  );
+  const [stats, setStats] = useState(
+    seeded?.stats ?? { sources: 0, entities: 0, relationships: 0, validations: 0 },
+  );
   const [error, setError] = useState<string | null>(null);
-  const [selectedRelationshipId, setSelectedRelationshipId] = useState<string | null>(null);
+  const [selectedRelationshipId, setSelectedRelationshipId] = useState<string | null>(
+    null,
+  );
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [focusedEntityIds, setFocusedEntityIds] = useState<string[]>([]);
   const [focusedRelationshipIds, setFocusedRelationshipIds] = useState<string[]>([]);
   const [expanded, setExpanded] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatTurn[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatTurn[]>(seeded?.chat ?? []);
   const [queryLoading, setQueryLoading] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [view, setView] = useState<MainView>(
+    seeded && seeded.status === "complete" && seeded.relationships.length > 0
+      ? "claims"
+      : "graph",
+  );
+  const [frozenAt, setFrozenAt] = useState<number | null>(seeded?.frozenAt ?? null);
+  const [createdAt, setCreatedAt] = useState<number | null>(
+    initialSession?.createdAt ?? null,
+  );
+  const [credits, setCredits] = useState(user?.credits ?? 0);
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
   const runStartedAtRef = useRef<number | null>(null);
-  const sessionIdRef = useRef<string | null>(null);
+  const sessionIdRef = useRef<string | null>(sessionId);
+  const autoStarted = useRef(false);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
 
-  sessionIdRef.current = sessionId;
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   const resetGraph = () => {
     setEntities([]);
@@ -66,7 +136,7 @@ export function ResearchWorkspace() {
     setEvidence({});
     setSources([]);
     setLogs([]);
-    setStats({ sources: 0, entities: 0, relationships: 0 });
+    setStats({ sources: 0, entities: 0, relationships: 0, validations: 0 });
     setSelectedRelationshipId(null);
     setSelectedEntityId(null);
     setFocusedEntityIds([]);
@@ -76,23 +146,29 @@ export function ResearchWorkspace() {
     setQueryError(null);
     setError(null);
     setElapsedMs(null);
+    setFrozenAt(null);
+    setView("graph");
     runStartedAtRef.current = null;
+    setCreatedAt(null);
   };
 
   const startNewGraph = () => {
-    resetGraph();
-    setSessionId(null);
-    setStarted(false);
-    setStatus("idle");
-    setMode(null);
-    setJevStatus("mock");
-    setQuery(DEMO_QUERY);
+    router.push("/");
+  };
+
+  const refreshCredits = async () => {
+    const response = await fetch("/api/auth/me");
+    const payload = (await response.json()) as { user?: AuthUser | null };
+    if (payload.user) setCredits(payload.user.credits);
   };
 
   const handleEvent = useCallback((event: ResearchEvent) => {
     switch (event.type) {
       case "session":
         setSessionId(event.sessionId);
+        if (typeof window !== "undefined" && window.location.pathname.startsWith("/r/")) {
+          window.history.replaceState(null, "", `/r/${event.sessionId}`);
+        }
         break;
       case "mode":
         setMode(event.mode);
@@ -156,14 +232,18 @@ export function ResearchWorkspace() {
           sources: event.sources,
           entities: event.entities,
           relationships: event.validations ?? event.relationships,
+          validations: event.validations ?? event.relationships,
         });
         break;
       case "complete":
         setSessionId(event.sessionId);
         setStatus("complete");
+        setFrozenAt(Date.now());
+        setView("claims");
         if (runStartedAtRef.current != null) {
           setElapsedMs(Date.now() - runStartedAtRef.current);
         }
+        void refreshCredits();
         break;
       case "error":
         setError(event.message);
@@ -171,6 +251,7 @@ export function ResearchWorkspace() {
         if (runStartedAtRef.current != null) {
           setElapsedMs(Date.now() - runStartedAtRef.current);
         }
+        void refreshCredits();
         break;
     }
   }, []);
@@ -194,11 +275,13 @@ export function ResearchWorkspace() {
     );
     setStarted(true);
     setStatus("running");
+    setView("graph");
     setError(null);
     if (extending) {
       setQueryError(null);
     } else {
       resetGraph();
+      setCreatedAt(Date.now());
     }
     runStartedAtRef.current = Date.now();
     setElapsedMs(0);
@@ -245,6 +328,19 @@ export function ResearchWorkspace() {
     if (!nextQuery) return;
     await runResearchStream(nextQuery);
   };
+
+  useEffect(() => {
+    if (!autoStart || initialSession) return;
+    const next = (initialQuery ?? query).trim();
+    if (!next) return;
+    const timer = window.setTimeout(() => {
+      if (autoStarted.current) return;
+      autoStarted.current = true;
+      void runResearchStream(next);
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, initialSession, initialQuery]);
 
   const selectedRelationship =
     relationships.find((r) => r.id === selectedRelationshipId) ?? null;
@@ -361,12 +457,96 @@ export function ResearchWorkspace() {
     }
   };
 
+  const exportPack = async (format: "md" | "csv") => {
+    if (readOnly) {
+      const view: SessionView = {
+        id: sessionId ?? "share",
+        query,
+        queries: [query],
+        mode: mode ?? "demo",
+        createdAt: frozenAt ?? Date.now(),
+        frozenAt,
+        entities,
+        relationships,
+        validations,
+        evidence,
+        sources,
+        logs,
+        chat: chatMessages,
+        status: status === "idle" ? "complete" : status,
+        jevStatus,
+        stats,
+      };
+      const text = format === "csv" ? buildPackCsv(view) : buildPackMarkdown(view);
+      const blob = new Blob([text], {
+        type: format === "csv" ? "text/csv; charset=utf-8" : "text/markdown; charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download =
+        format === "csv" ? "astronotes-share.csv" : "astronotes-share.md";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    if (!sessionId) return;
+    const response = await fetch(`/api/research/${sessionId}/export?format=${format}`);
+    if (!response.ok) {
+      const payload = (await response.json()) as { error?: string };
+      setError(payload.error || "Export failed");
+      return;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download =
+      format === "csv"
+        ? `astronotes-${sessionId.slice(0, 8)}.csv`
+        : `astronotes-${sessionId.slice(0, 8)}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const sharePack = async () => {
+    if (!sessionId) return;
+    const response = await fetch(`/api/research/${sessionId}/share`, { method: "POST" });
+    const payload = (await response.json()) as { urlPath?: string; error?: string };
+    if (!response.ok || !payload.urlPath) {
+      setShareNotice(payload.error || "Share failed");
+      return;
+    }
+    const url = `${window.location.origin}${payload.urlPath}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareNotice("Share link copied");
+    } catch {
+      setShareNotice(url);
+    }
+  };
+
+  const accountUser = user ? { ...user, credits } : null;
+  const asOfStamp = frozenAt ?? createdAt;
+
   return (
     <AppShell
       trailing={
         <>
+          {started && asOfStamp != null && (
+            <span className="hidden font-mono text-[10px] uppercase tracking-[0.12em] text-dim lg:inline">
+              As of {formatAsOf({ frozenAt: asOfStamp, createdAt: asOfStamp })}
+            </span>
+          )}
           <ModeBadge mode={mode} jevStatus={jevStatus} />
           <ResearchStatus status={status} elapsedMs={elapsedMs} />
+          {accountUser && !readOnly && (
+            <AccountHeader user={accountUser} stripeEnabled={stripeEnabled} />
+          )}
         </>
       }
     >
@@ -377,21 +557,85 @@ export function ResearchWorkspace() {
             onQuery={setQuery}
             onSubmit={runResearch}
             disabled={status === "running"}
+            showTemplates
           />
         </div>
       ) : (
         <>
-          <div className="shrink-0 border-b border-line px-4 py-2">
-            <SearchBar
-              query={query}
-              onQuery={setQuery}
-              onSubmit={runResearch}
-              disabled={status === "running"}
-              compact
-              onNewGraph={startNewGraph}
-            />
-            {error && (
-              <p className="mt-2 text-[12px] text-danger">{error}</p>
+          {!readOnly && (
+            <div className="shrink-0 border-b border-line px-4 py-2">
+              <SearchBar
+                query={query}
+                onQuery={setQuery}
+                onSubmit={runResearch}
+                disabled={status === "running"}
+                compact
+                onNewGraph={startNewGraph}
+              />
+              {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
+            </div>
+          )}
+          {readOnly && (
+            <div className="shrink-0 border-b border-line px-4 py-3">
+              <div className="label">Shared evidence pack</div>
+              <p className="mt-1 text-[13px] text-ink">{query}</p>
+            </div>
+          )}
+          <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2">
+            <button
+              type="button"
+              onClick={() => setView("graph")}
+              className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ${
+                view === "graph"
+                  ? "border-line-strong text-ink"
+                  : "border-line text-muted hover:text-ink"
+              }`}
+            >
+              Graph
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("claims")}
+              className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ${
+                view === "claims"
+                  ? "border-line-strong text-ink"
+                  : "border-line text-muted hover:text-ink"
+              }`}
+            >
+              Claims
+            </button>
+            {(readOnly || sessionId) && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void exportPack("md")}
+                  disabled={relationships.length === 0}
+                  className={`${readOnly ? "ml-auto" : "ml-auto"} border border-line px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:text-ink disabled:opacity-40`}
+                >
+                  Export md
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void exportPack("csv")}
+                  disabled={relationships.length === 0}
+                  className="border border-line px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:text-ink disabled:opacity-40"
+                >
+                  Export csv
+                </button>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => void sharePack()}
+                    disabled={relationships.length === 0}
+                    className="border border-line px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:text-ink disabled:opacity-40"
+                  >
+                    Share
+                  </button>
+                )}
+              </>
+            )}
+            {shareNotice && (
+              <span className="font-mono text-[10px] text-live">{shareNotice}</span>
             )}
           </div>
           <div className="flex min-h-0 flex-1">
@@ -414,6 +658,19 @@ export function ResearchWorkspace() {
                     </p>
                   )}
                 </div>
+              ) : view === "claims" ? (
+                <ClaimTable
+                  entities={entities}
+                  relationships={relationships}
+                  validations={validations}
+                  evidence={evidence}
+                  sources={sources}
+                  selectedRelationshipId={selectedRelationshipId}
+                  onSelect={(id) => {
+                    selectRelationship(id);
+                    setView("graph");
+                  }}
+                />
               ) : (
                 <>
                   {status === "running" && (
@@ -433,47 +690,49 @@ export function ResearchWorkspace() {
                     </div>
                   )}
                   <KnowledgeGraph
-                  entities={entities}
-                  relationships={relationships}
-                  validations={validations}
-                  selectedRelationshipId={selectedRelationshipId}
-                  selectedEntityId={selectedEntityId}
-                  focusedEntityIds={focusedEntityIds}
-                  focusedRelationshipIds={focusedRelationshipIds}
-                  expanded={expanded}
-                  onSelectRelationship={(id) => selectRelationship(id)}
-                  onSelectEntity={selectEntity}
-                  onToggleExpand={() => setExpanded((v) => !v)}
-                  onResetSelection={() => {
-                    selectEntity(null);
-                    setFocusedRelationshipIds([]);
-                    setExpanded(false);
-                  }}
-                />
-                <EntityInfoPanel
-                  entity={entities.find((e) => e.id === selectedEntityId) ?? null}
-                  entities={entities}
-                  relationships={relationships}
-                  selectedRelationshipId={selectedRelationshipId}
-                  evidence={selectedEvidence}
-                  onClose={() => selectEntity(null)}
-                  onSelectConnection={selectRelationship}
-                />
+                    entities={entities}
+                    relationships={relationships}
+                    validations={validations}
+                    selectedRelationshipId={selectedRelationshipId}
+                    selectedEntityId={selectedEntityId}
+                    focusedEntityIds={focusedEntityIds}
+                    focusedRelationshipIds={focusedRelationshipIds}
+                    expanded={expanded}
+                    onSelectRelationship={(id) => selectRelationship(id)}
+                    onSelectEntity={selectEntity}
+                    onToggleExpand={() => setExpanded((v) => !v)}
+                    onResetSelection={() => {
+                      selectEntity(null);
+                      setFocusedRelationshipIds([]);
+                      setExpanded(false);
+                    }}
+                  />
+                  <EntityInfoPanel
+                    entity={entities.find((e) => e.id === selectedEntityId) ?? null}
+                    entities={entities}
+                    relationships={relationships}
+                    selectedRelationshipId={selectedRelationshipId}
+                    evidence={selectedEvidence}
+                    onClose={() => selectEntity(null)}
+                    onSelectConnection={selectRelationship}
+                  />
                 </>
               )}
             </div>
-            <div className="h-full w-[340px] shrink-0">
-              <ChatPanel
-                disabled={status === "running" || !sessionId || entities.length === 0}
-                onAsk={askGraph}
-                messages={chatMessages}
-                loading={queryLoading}
-                error={queryError}
-                selectedEntityId={selectedEntityId}
-                selectedRelationshipId={selectedRelationshipId}
-                onSelectEdge={(id) => selectRelationship(id)}
-              />
-            </div>
+            {!readOnly && (
+              <div className="h-full w-[340px] shrink-0">
+                <ChatPanel
+                  disabled={status === "running" || !sessionId || entities.length === 0}
+                  onAsk={askGraph}
+                  messages={chatMessages}
+                  loading={queryLoading}
+                  error={queryError}
+                  selectedEntityId={selectedEntityId}
+                  selectedRelationshipId={selectedRelationshipId}
+                  onSelectEdge={(id) => selectRelationship(id)}
+                />
+              </div>
+            )}
           </div>
           <ResearchFeed events={logs} stats={stats} sources={sources} />
         </>

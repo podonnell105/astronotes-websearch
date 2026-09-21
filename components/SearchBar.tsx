@@ -1,6 +1,6 @@
 "use client";
 
-import { DEMO_QUERY } from "@/lib/demo";
+import { DEFAULT_QUERY, QUERY_TEMPLATES } from "@/lib/templates";
 
 export function SearchBar({
   query,
@@ -9,6 +9,7 @@ export function SearchBar({
   disabled,
   compact,
   onNewGraph,
+  showTemplates,
 }: {
   query: string;
   onQuery: (value: string) => void;
@@ -16,6 +17,7 @@ export function SearchBar({
   disabled?: boolean;
   compact?: boolean;
   onNewGraph?: () => void;
+  showTemplates?: boolean;
 }) {
   return (
     <div className={compact ? "w-full" : "mx-auto w-full max-w-2xl"}>
@@ -35,7 +37,7 @@ export function SearchBar({
                 onSubmit();
               }
             }}
-            placeholder={DEMO_QUERY}
+            placeholder={DEFAULT_QUERY}
             className="min-w-0 flex-1 bg-transparent text-[13px] leading-6 text-ink outline-none placeholder:text-dim"
           />
         ) : (
@@ -49,7 +51,7 @@ export function SearchBar({
               }
             }}
             rows={2}
-            placeholder={DEMO_QUERY}
+            placeholder={DEFAULT_QUERY}
             className="w-full resize-none bg-transparent text-[14px] leading-6 text-ink outline-none placeholder:text-dim"
           />
         )}
@@ -77,7 +79,23 @@ export function SearchBar({
         )}
       </div>
       {!compact && (
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex items-center justify-between gap-3">
+          {showTemplates ? (
+            <div className="flex flex-wrap gap-2">
+              {QUERY_TEMPLATES.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onQuery(item.query)}
+                  className="border border-line px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:border-line-strong hover:text-ink"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span />
+          )}
           <button
             type="button"
             onClick={onSubmit}

@@ -204,3 +204,53 @@ export type ChatTurn = {
 };
 
 export type Emit = (event: ResearchEvent) => void;
+
+export type SessionView = {
+  id: string;
+  query: string;
+  queries: string[];
+  mode: RuntimeMode;
+  createdAt: number;
+  frozenAt: number | null;
+  entities: Entity[];
+  relationships: Relationship[];
+  validations: Record<string, Validation>;
+  evidence: Record<string, EvidenceRecord>;
+  sources: SearchResult[];
+  logs: Extract<ResearchEvent, { type: "log" }>[];
+  chat: ChatTurn[];
+  status: "running" | "complete" | "error";
+  jevStatus: "jev" | "mock";
+  stats: {
+    sources: number;
+    entities: number;
+    relationships: number;
+    validations: number;
+  };
+};
+
+export type SessionSummary = {
+  id: string;
+  query: string;
+  createdAt: number;
+  frozenAt: number | null;
+  status: "running" | "complete" | "error";
+  mode: RuntimeMode;
+  jevStatus: "jev" | "mock";
+  sources: number;
+  entities: number;
+  relationships: number;
+  validations: number;
+};
+
+export type AuthUser = {
+  id: string;
+  email: string;
+  credits: number;
+};
+
+export type QueryTemplate = {
+  id: "landscape" | "counterparty" | "audit";
+  label: string;
+  query: string;
+};

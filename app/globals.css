@@ -68,6 +68,9 @@ html.light {
   --color-live: var(--live);
   --color-warn: var(--warn);
   --color-danger: var(--danger);
+  --color-supported: var(--supported);
+  --color-uncertain: var(--uncertain);
+  --color-contradicted: var(--contradicted);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -407,4 +410,84 @@ html.light .pixel-compose-motif {
   font-size: 12px;
   line-height: 1.35;
   color: var(--muted);
+}
+
+.claim-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.claim-table th {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 500;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.claim-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  color: var(--muted);
+}
+
+.claim-row {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.claim-row:hover td {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.claim-row--active td {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.claim-decision {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.claim-decision--SUPPORTED {
+  color: var(--supported);
+}
+
+.claim-decision--UNCERTAIN {
+  color: var(--uncertain);
+}
+
+.claim-decision--CONTRADICTED {
+  color: var(--contradicted);
+}
+
+.claim-decision--PENDING {
+  color: var(--dim);
+}
+
+.auth-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--canvas);
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--ink);
+  outline: none;
+}
+
+.auth-input:focus {
+  border-color: var(--line-strong);
 }

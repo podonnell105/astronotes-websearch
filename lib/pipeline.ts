@@ -47,13 +47,13 @@ export async function runResearch(
   query: string,
   emit: Emit,
   sessionId?: string,
-  options?: { preferExistingLinks?: boolean },
+  options?: { preferExistingLinks?: boolean; userId?: string },
 ): Promise<SessionRecord> {
   const runtime = detectRuntime();
   const nextQuery = query.trim() || DEMO_QUERY;
   const session = sessionId
     ? resumeOrThrow(sessionId, nextQuery)
-    : createSession(nextQuery, runtime.mode);
+    : createSession(requiredUserId(options?.userId), nextQuery, runtime.mode);
   const extending = Boolean(sessionId);
   const preferExistingLinks = Boolean(options?.preferExistingLinks && extending);
   const stagger = runtime.mode === "demo" ? 140 : 0;
@@ -345,6 +345,11 @@ export async function runResearch(
     emit(event);
     return session;
   }
+}
+
+function requiredUserId(userId: string | undefined): string {
+  if (!userId) throw new Error("Sign in required");
+  return userId;
 }
 
 function resumeOrThrow(sessionId: string, query: string): SessionRecord {
