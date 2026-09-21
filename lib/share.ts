@@ -1,12 +1,15 @@
 import { mutate, read } from "./db";
+import { remoteShare, useRemoteStore } from "./remote";
 import { parseSessionView, toSessionView, type SessionRecord } from "./store";
 import type { SessionView } from "./types";
 
-export function createShare(session: SessionRecord): { token: string; urlPath: string } {
+export async function createShare(
+  session: SessionRecord,
+): Promise<{ token: string; urlPath: string }> {
   const token = crypto.randomUUID().replace(/-/g, "");
   const view = toSessionView(session);
   view.frozenAt = view.frozenAt ?? Date.now();
-  mutate((store) => {
+  await mutate((store) => {
     store.shares.push({
       token,
       session_id: session.id,
@@ -18,8 +21,9 @@ export function createShare(session: SessionRecord): { token: string; urlPath: s
   return { token, urlPath: `/s/${token}` };
 }
 
-export function getShare(token: string): SessionView | undefined {
-  const row = read((store) => store.shares.find((item) => item.token === token));
+export async function getShare(token: string): Promise<SessionView | undefined> {
+  if (useRemoteStore()) return (await remoteShare(token)) ?? undefined;
+  const row = await read((store) => store.shares.find((item) => item.token === token));
   if (!row) return undefined;
   return parseSessionView(row.payload);
 }

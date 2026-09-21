@@ -1,14 +1,24 @@
 import { requireUser } from "@/lib/auth";
+import { applyCors } from "@/lib/cors";
 import { debitCredits, RESEARCH_CREDIT_COST } from "@/lib/credits";
 import { apiError } from "@/lib/http";
 import { runResearch } from "@/lib/pipeline";
 import { normalizeSourcePolicy } from "@/lib/sources";
-import { getSession } from "@/lib/store";
+import { getSession, listSessionsForUser } from "@/lib/store";
 import type { ResearchEvent } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+export async function GET() {
+  try {
+    const user = await requireUser();
+    return Response.json({ graphs: await listSessionsForUser(user.id) });
+  } catch (error) {
+    return apiError(error);
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -26,13 +36,13 @@ export async function POST(request: Request) {
 
     const sessionId = body.sessionId?.trim() || undefined;
     if (sessionId) {
-      const existing = getSession(sessionId);
+      const existing = await getSession(sessionId);
       if (!existing || existing.userId !== user.id) {
         return Response.json({ error: "Research session not found" }, { status: 404 });
       }
     }
     const preferExistingLinks = Boolean(body.preferExistingLinks && sessionId);
-    debitCredits(
+    await debitCredits(
       user.id,
       RESEARCH_CREDIT_COST,
       sessionId ? "extend_graph" : "research_run",
@@ -60,14 +70,16 @@ export async function POST(request: Request) {
       },
     });
 
-    return new Response(stream, {
-      headers: {
+    const headers = applyCors(
+      request,
+      new Headers({
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
-      },
-    });
+      }),
+    );
+    return new Response(stream, { headers });
   } catch (error) {
     return apiError(error);
   }

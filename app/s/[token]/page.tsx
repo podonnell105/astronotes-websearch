@@ -10,7 +10,7 @@ export default async function SharePage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const view = getShare(token);
+  const view = await getShare(token);
   if (!view) notFound();
   return <ResearchWorkspace initialSession={view} readOnly />;
 }

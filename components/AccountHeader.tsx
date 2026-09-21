@@ -1,5 +1,6 @@
 "use client";
 
+import { apiFetch } from "@/lib/api";
 import type { AuthUser } from "@/lib/types";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -16,7 +17,7 @@ export function AccountHeader({
   const [message, setMessage] = useState<string | null>(null);
 
   const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await apiFetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
     router.refresh();
   };
@@ -25,7 +26,7 @@ export function AccountHeader({
     setBusy(true);
     setMessage(null);
     try {
-      const response = await fetch("/api/billing/checkout", { method: "POST" });
+      const response = await apiFetch("/api/billing/checkout", { method: "POST" });
       const payload = (await response.json()) as { url?: string; error?: string };
       if (!response.ok || !payload.url) {
         throw new Error(payload.error || "Checkout failed");
@@ -52,7 +53,7 @@ export function AccountHeader({
           {busy ? "Checkout" : "Buy credits"}
         </button>
       )}
-      <span className="hidden text-[12px] text-dim sm:inline">{user.email}</span>
+      <span className="hidden text-[12px] text-dim xl:inline">{user.email}</span>
       <button
         type="button"
         onClick={logout}

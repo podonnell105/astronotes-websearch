@@ -1,6 +1,6 @@
 "use client";
 
-import { PixelComposeMotif, formatElapsed } from "@/components/PixelComposeMotif";
+import { formatElapsed } from "@/components/PixelComposeMotif";
 import { linkifyEntityText } from "@/lib/entityLinks";
 import type { ChatTurn, Entity } from "@/lib/types";
 import { useEffect, useRef, useState } from "react";
@@ -16,6 +16,7 @@ export function ChatPanel({
   selectedRelationshipId,
   onSelectEdge,
   onSelectEntity,
+  onCollapse,
 }: {
   disabled?: boolean;
   onAsk: (question: string, options: { extend: boolean }) => void;
@@ -27,6 +28,7 @@ export function ChatPanel({
   selectedRelationshipId: string | null;
   onSelectEdge: (relationshipId: string) => void;
   onSelectEntity: (id: string | null) => void;
+  onCollapse?: () => void;
 }) {
   const [question, setQuestion] = useState("");
   const [extend, setExtend] = useState(false);
@@ -60,13 +62,24 @@ export function ChatPanel({
   return (
     <aside className="flex h-full min-h-0 flex-col border-l border-line bg-panel">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-4">
-        {loading && <PixelComposeMotif />}
         <div className="label">Ask this research</div>
-        {elapsedMs != null && (
-          <span className="ml-auto font-mono text-[10px] text-dim">
-            {formatElapsed(elapsedMs)}
-          </span>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {elapsedMs != null && (
+            <span className="font-mono text-[10px] text-dim">
+              {formatElapsed(elapsedMs)}
+            </span>
+          )}
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              className="border border-line px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:border-line-strong hover:text-ink"
+              title="Hide chat"
+            >
+              Hide
+            </button>
+          )}
+        </div>
       </div>
 
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">

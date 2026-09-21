@@ -9,6 +9,7 @@ import { ModeBadge, ResearchStatus } from "@/components/ModeBadge";
 import { PixelComposeMotif, formatElapsed } from "@/components/PixelComposeMotif";
 import { ResearchFeed } from "@/components/ResearchFeed";
 import { SearchBar } from "@/components/SearchBar";
+import { apiFetch } from "@/lib/api";
 import { buildPackCsv, buildPackMarkdown } from "@/lib/pack";
 import { formatAsOf } from "@/lib/claims";
 import { hasResearchIntent } from "@/lib/researchIntent";
@@ -35,6 +36,14 @@ import type {
 } from "@/lib/types";
 import type { DataSourceId } from "@/lib/dataCatalog";
 import { DEFAULT_AVAILABLE_SOURCES } from "@/lib/dataCatalog";
+import {
+  CHAT_OPEN_KEY,
+  FEED_OPEN_KEY,
+  FILTERS_OPEN_KEY,
+  GRAPH_CHROME_OPEN_KEY,
+  SEARCH_OPEN_KEY,
+  usePersistentBoolean,
+} from "@/lib/uiPrefs";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -146,6 +155,14 @@ export function ResearchWorkspace({
   const autoStarted = useRef(false);
   const policyRef = useRef(sourcePolicy);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+  const [chatOpen, setChatOpen] = usePersistentBoolean(CHAT_OPEN_KEY, true);
+  const [feedOpen, setFeedOpen] = usePersistentBoolean(FEED_OPEN_KEY, true);
+  const [searchOpen, setSearchOpen] = usePersistentBoolean(SEARCH_OPEN_KEY, true);
+  const [filtersOpen, setFiltersOpen] = usePersistentBoolean(FILTERS_OPEN_KEY, true);
+  const [graphChromeOpen, setGraphChromeOpen] = usePersistentBoolean(
+    GRAPH_CHROME_OPEN_KEY,
+    true,
+  );
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -184,7 +201,7 @@ export function ResearchWorkspace({
   };
 
   const refreshCredits = async () => {
-    const response = await fetch("/api/auth/me");
+    const response = await apiFetch("/api/auth/me");
     const payload = (await response.json()) as { user?: AuthUser | null };
     if (payload.user) setCredits(payload.user.credits);
   };
@@ -270,7 +287,6 @@ export function ResearchWorkspace({
         setSessionId(event.sessionId);
         setStatus("complete");
         setFrozenAt(Date.now());
-        setView("claims");
         if (runStartedAtRef.current != null) {
           setElapsedMs(Date.now() - runStartedAtRef.current);
         }
@@ -319,7 +335,7 @@ export function ResearchWorkspace({
 
     let failMessage: string | null = null;
     try {
-      const response = await fetch("/api/research", {
+      const response = await apiFetch("/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -464,7 +480,7 @@ export function ResearchWorkspace({
       }
       const queryId = sessionIdRef.current;
       if (!queryId) throw new Error("Research session not found");
-      const response = await fetch(`/api/research/${queryId}/query`, {
+      const response = await apiFetch(`/api/research/${queryId}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question }),
@@ -537,7 +553,7 @@ export function ResearchWorkspace({
       return;
     }
     if (!sessionId) return;
-    const response = await fetch(`/api/research/${sessionId}/export?format=${format}`);
+    const response = await apiFetch(`/api/research/${sessionId}/export?format=${format}`);
     if (!response.ok) {
       const payload = (await response.json()) as { error?: string };
       setError(payload.error || "Export failed");
@@ -559,7 +575,7 @@ export function ResearchWorkspace({
 
   const sharePack = async () => {
     if (!sessionId) return;
-    const response = await fetch(`/api/research/${sessionId}/share`, { method: "POST" });
+    const response = await apiFetch(`/api/research/${sessionId}/share`, { method: "POST" });
     const payload = (await response.json()) as { urlPath?: string; error?: string };
     if (!response.ok || !payload.urlPath) {
       setShareNotice(payload.error || "Share failed");
@@ -615,7 +631,7 @@ export function ResearchWorkspace({
         </div>
       ) : (
         <>
-          {!readOnly && (
+          {searchOpen && !readOnly && (
             <div className="shrink-0 border-b border-line px-4 py-2">
               <SearchBar
                 query={query}
@@ -624,6 +640,7 @@ export function ResearchWorkspace({
                 disabled={status === "running"}
                 compact
                 onNewGraph={startNewGraph}
+                onCollapse={() => setSearchOpen(false)}
                 policy={sourcePolicy}
                 onPolicy={setSourcePolicy}
                 availableDataSources={availableDataSources}
@@ -631,39 +648,65 @@ export function ResearchWorkspace({
               {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
             </div>
           )}
-          {readOnly && (
-            <div className="shrink-0 border-b border-line px-4 py-3">
-              <div className="label">Shared evidence pack</div>
-              <p className="mt-1 text-[13px] text-ink">{query}</p>
-              <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
-                {formatSourcePolicy(sourcePolicy)}
-                {droppedSources.length > 0 ? ` · Dropped ${droppedSources.length}` : ""}
-              </p>
+          {!searchOpen && !readOnly && error && (
+            <p className="shrink-0 border-b border-line px-4 py-2 text-[12px] text-danger">
+              {error}
+            </p>
+          )}
+          {searchOpen && readOnly && (
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-line px-4 py-3">
+              <div className="min-w-0">
+                <div className="label">Shared evidence pack</div>
+                <p className="mt-1 text-[13px] text-ink">{query}</p>
+                <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+                  {formatSourcePolicy(sourcePolicy)}
+                  {droppedSources.length > 0 ? ` · Dropped ${droppedSources.length}` : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSearchOpen(false)}
+                className="border border-line px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:border-line-strong hover:text-ink"
+                title="Hide pack details"
+              >
+                Hide
+              </button>
             </div>
           )}
-          <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2">
-            <button
-              type="button"
-              onClick={() => setView("graph")}
-              className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ${
-                view === "graph"
-                  ? "border-line-strong text-ink"
-                  : "border-line text-muted hover:text-ink"
-              }`}
-            >
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2">
+            <ToolbarToggle active={view === "graph"} onClick={() => setView("graph")}>
               Graph
-            </button>
-            <button
-              type="button"
-              onClick={() => setView("claims")}
-              className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ${
-                view === "claims"
-                  ? "border-line-strong text-ink"
-                  : "border-line text-muted hover:text-ink"
-              }`}
-            >
+            </ToolbarToggle>
+            <ToolbarToggle active={view === "claims"} onClick={() => setView("claims")}>
               Claims
-            </button>
+            </ToolbarToggle>
+            <ToolbarToggle active={searchOpen} onClick={() => setSearchOpen((open) => !open)}>
+              Search
+            </ToolbarToggle>
+            {view === "graph" && (
+              <ToolbarToggle
+                active={graphChromeOpen}
+                onClick={() => setGraphChromeOpen((open) => !open)}
+              >
+                Tools
+              </ToolbarToggle>
+            )}
+            {view === "claims" && (
+              <ToolbarToggle
+                active={filtersOpen}
+                onClick={() => setFiltersOpen((open) => !open)}
+              >
+                Filters
+              </ToolbarToggle>
+            )}
+            {!readOnly && (
+              <ToolbarToggle active={chatOpen} onClick={() => setChatOpen((open) => !open)}>
+                Chat
+              </ToolbarToggle>
+            )}
+            <ToolbarToggle active={feedOpen} onClick={() => setFeedOpen((open) => !open)}>
+              Log
+            </ToolbarToggle>
             {(readOnly || sessionId) && (
               <>
                 <button
@@ -730,11 +773,13 @@ export function ResearchWorkspace({
                     selectRelationship(id);
                     setView("graph");
                   }}
+                  filtersOpen={filtersOpen}
+                  onToggleFilters={() => setFiltersOpen(false)}
                 />
               ) : (
                 <>
                   {status === "running" && (
-                    <div className="pointer-events-none absolute right-4 top-12 z-10 flex items-center gap-3 border border-line bg-panel/90 px-3 py-2">
+                    <div className={`pointer-events-none absolute right-4 z-10 flex items-center gap-3 border border-line bg-panel/90 px-3 py-2 ${graphChromeOpen ? "top-12" : "top-4"}`}>
                       <PixelComposeMotif />
                       <div>
                         <div className="label">Composing</div>
@@ -745,7 +790,7 @@ export function ResearchWorkspace({
                     </div>
                   )}
                   {status === "complete" && elapsedMs != null && (
-                    <div className="pointer-events-none absolute right-4 top-12 z-10 border border-line bg-panel/90 px-3 py-2 font-mono text-[11px] text-dim">
+                    <div className={`pointer-events-none absolute right-4 z-10 border border-line bg-panel/90 px-3 py-2 font-mono text-[11px] text-dim ${graphChromeOpen ? "top-12" : "top-4"}`}>
                       {formatElapsed(elapsedMs)}
                     </div>
                   )}
@@ -766,6 +811,8 @@ export function ResearchWorkspace({
                       setFocusedRelationshipIds([]);
                       setExpanded(false);
                     }}
+                    chromeOpen={graphChromeOpen}
+                    onToggleChrome={() => setGraphChromeOpen(false)}
                   />
                   <EntityInfoPanel
                     entity={entities.find((e) => e.id === selectedEntityId) ?? null}
@@ -779,24 +826,41 @@ export function ResearchWorkspace({
                 </>
               )}
             </div>
-            {!readOnly && (
-              <div className="h-full w-[340px] shrink-0">
-                <ChatPanel
-                  disabled={status === "running" || !sessionId || entities.length === 0}
-                  onAsk={askGraph}
-                  messages={chatMessages}
-                  loading={queryLoading}
-                  error={queryError}
-                  entities={entities}
-                  selectedEntityId={selectedEntityId}
-                  selectedRelationshipId={selectedRelationshipId}
-                  onSelectEdge={(id) => selectRelationship(id)}
-                  onSelectEntity={selectEntity}
-                />
-              </div>
-            )}
+            {!readOnly &&
+              (chatOpen ? (
+                <div className="h-full w-[340px] shrink-0">
+                  <ChatPanel
+                    disabled={status === "running" || !sessionId || entities.length === 0}
+                    onAsk={askGraph}
+                    messages={chatMessages}
+                    loading={queryLoading}
+                    error={queryError}
+                    entities={entities}
+                    selectedEntityId={selectedEntityId}
+                    selectedRelationshipId={selectedRelationshipId}
+                    onSelectEdge={(id) => selectRelationship(id)}
+                    onSelectEntity={selectEntity}
+                    onCollapse={() => setChatOpen(false)}
+                  />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setChatOpen(true)}
+                  className="flex h-full w-9 shrink-0 flex-col items-center justify-center border-l border-line bg-panel text-muted hover:text-ink"
+                  title="Show chat"
+                >
+                  <span className="label [writing-mode:vertical-rl] rotate-180">Ask</span>
+                </button>
+              ))}
           </div>
-          <ResearchFeed events={logs} stats={stats} sources={sources} />
+          <ResearchFeed
+            events={logs}
+            stats={stats}
+            sources={sources}
+            collapsed={!feedOpen}
+            onToggle={() => setFeedOpen((open) => !open)}
+          />
         </>
       )}
     </AppShell>
@@ -840,4 +904,28 @@ async function readSSE(
       onEvent(JSON.parse(payload) as ResearchEvent);
     }
   }
+}
+
+function ToolbarToggle({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ${
+        active
+          ? "border-line-strong text-ink"
+          : "border-line text-muted hover:text-ink"
+      }`}
+    >
+      {children}
+    </button>
+  );
 }

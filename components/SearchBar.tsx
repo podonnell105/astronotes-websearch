@@ -26,6 +26,7 @@ export function SearchBar({
   disabled,
   compact,
   onNewGraph,
+  onCollapse,
   policy = emptySourcePolicy(),
   onPolicy,
   availableDataSources = DEFAULT_AVAILABLE_SOURCES,
@@ -36,6 +37,7 @@ export function SearchBar({
   disabled?: boolean;
   compact?: boolean;
   onNewGraph?: () => void;
+  onCollapse?: () => void;
   policy?: SourcePolicy;
   onPolicy?: (policy: SourcePolicy) => void;
   availableDataSources?: DataSourceId[];
@@ -135,6 +137,16 @@ export function SearchBar({
             >
               Research →
             </button>
+            {onCollapse && (
+              <button
+                type="button"
+                onClick={onCollapse}
+                className="border border-line px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:border-line-strong hover:text-ink"
+                title="Hide search"
+              >
+                Hide
+              </button>
+            )}
           </div>
         )}
       </div>

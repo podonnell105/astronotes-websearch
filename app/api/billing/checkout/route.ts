@@ -13,7 +13,9 @@ export async function POST(request: Request) {
       return Response.json({ error: "Billing is not configured." }, { status: 400 });
     }
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
-    const origin = new URL(request.url).origin;
+    const origin =
+      process.env.FRONTEND_ORIGIN?.trim().replace(/\/$/, "") ||
+      new URL(request.url).origin;
     const pack = Number(process.env.STRIPE_CREDIT_PACK ?? CREDIT_PACK_SIZE);
     const session = await stripe.checkout.sessions.create({
       mode: "payment",

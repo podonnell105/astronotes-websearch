@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const password = body.password ?? "";
     const invalid = validateCredentials(email, password);
     if (invalid) return Response.json({ error: invalid }, { status: 400 });
-    if (findUserByEmail(email)) {
+    if (await findUserByEmail(email)) {
       return Response.json({ error: "An account with that email already exists." }, { status: 409 });
     }
     const user = await createUser(email, password);

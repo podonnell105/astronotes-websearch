@@ -1,8 +1,9 @@
 import { mutate, read } from "./db";
+import { remoteCurrentUser, useRemoteStore } from "./remote";
 import type { AuthUser } from "./types";
 import { scrypt as scryptCallback, randomBytes, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 const scrypt = promisify(scryptCallback);
 const COOKIE = "an_session";
@@ -11,6 +12,28 @@ const STARTER_CREDITS = 5;
 
 export function starterCredits(): number {
   return STARTER_CREDITS;
+}
+
+async function cookieOptions(expires: Date) {
+  const host =
+    (await headers()).get("x-forwarded-host") ||
+    (await headers()).get("host") ||
+    "";
+  const configured = process.env.COOKIE_DOMAIN?.trim();
+  const domain = host.endsWith("astronotes.ai")
+    ? ".astronotes.ai"
+    : configured && host.endsWith(configured.replace(/^\./, ""))
+      ? configured
+      : undefined;
+  const production = process.env.NODE_ENV === "production";
+  return {
+    httpOnly: true,
+    path: "/",
+    expires,
+    secure: production,
+    sameSite: (production && domain ? "none" : "lax") as "none" | "lax",
+    ...(domain ? { domain } : {}),
+  };
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -56,7 +79,7 @@ export async function createUser(email: string, password: string): Promise<AuthU
   });
 }
 
-export function findUserByEmail(email: string) {
+export async function findUserByEmail(email: string) {
   return read((store) => {
     const row = store.users.find((user) => user.email === email);
     if (!row) return undefined;
@@ -69,7 +92,7 @@ export function findUserByEmail(email: string) {
   });
 }
 
-export function getUserById(id: string): AuthUser | undefined {
+export async function getUserById(id: string): Promise<AuthUser | undefined> {
   return read((store) => {
     const row = store.users.find((user) => user.id === id);
     if (!row) return undefined;
@@ -80,17 +103,11 @@ export function getUserById(id: string): AuthUser | undefined {
 export async function createAuthCookie(userId: string): Promise<string> {
   const id = randomBytes(32).toString("hex");
   const expiresAt = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
-  mutate((store) => {
+  await mutate((store) => {
     store.auth_sessions.push({ id, user_id: userId, expires_at: expiresAt });
   });
   const jar = await cookies();
-  jar.set(COOKIE, id, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    expires: new Date(expiresAt),
-    secure: process.env.NODE_ENV === "production",
-  });
+  jar.set(COOKIE, id, await cookieOptions(new Date(expiresAt)));
   return id;
 }
 
@@ -98,14 +115,15 @@ export async function clearAuthCookie() {
   const jar = await cookies();
   const token = jar.get(COOKIE)?.value;
   if (token) {
-    mutate((store) => {
+    await mutate((store) => {
       store.auth_sessions = store.auth_sessions.filter((row) => row.id !== token);
     });
   }
-  jar.delete(COOKIE);
+  jar.set(COOKIE, "", { ...(await cookieOptions(new Date(0))), expires: new Date(0) });
 }
 
 export async function getCurrentUser(): Promise<AuthUser | null> {
+  if (useRemoteStore()) return remoteCurrentUser();
   const jar = await cookies();
   const token = jar.get(COOKIE)?.value;
   if (!token) return null;

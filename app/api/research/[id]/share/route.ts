@@ -13,11 +13,11 @@ export async function POST(
   try {
     const user = await requireUser();
     const { id } = await context.params;
-    const session = getSession(id);
+    const session = await getSession(id);
     if (!session || session.userId !== user.id) {
       return Response.json({ error: "Research session not found" }, { status: 404 });
     }
-    const share = createShare(session);
+    const share = await createShare(session);
     return Response.json(share);
   } catch (error) {
     return apiError(error);

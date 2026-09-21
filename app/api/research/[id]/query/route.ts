@@ -13,7 +13,7 @@ export async function POST(
   try {
     const user = await requireUser();
     const { id } = await context.params;
-    const session = getSession(id);
+    const session = await getSession(id);
     if (!session || session.userId !== user.id) {
       return Response.json({ error: "Research session not found" }, { status: 404 });
     }
@@ -35,7 +35,7 @@ export async function POST(
         edgeReferences: result.edgeReferences,
       },
     ];
-    appendChat(session, turns);
+    await appendChat(session, turns);
     return Response.json(result satisfies GraphQueryResponse);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Query failed";

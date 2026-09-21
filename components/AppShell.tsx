@@ -17,7 +17,7 @@ export function AppShell({
             ASTRONOTES
           </Link>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-3">
+        <div className="flex min-w-0 flex-nowrap items-center justify-end gap-3">
           {trailing}
           <ThemeToggle />
         </div>

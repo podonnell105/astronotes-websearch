@@ -1,5 +1,6 @@
 "use client";
 
+import { apiFetch } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -15,7 +16,7 @@ export function LoginForm() {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         mode === "signup" ? "/api/auth/signup" : "/api/auth/login",
         {
           method: "POST",

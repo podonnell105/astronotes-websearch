@@ -166,6 +166,8 @@ function GraphInner({
   onSelectEntity,
   onToggleExpand,
   onResetSelection,
+  chromeOpen = true,
+  onToggleChrome,
 }: {
   entities: Entity[];
   relationships: Relationship[];
@@ -179,6 +181,8 @@ function GraphInner({
   onSelectEntity: (id: string | null) => void;
   onToggleExpand: () => void;
   onResetSelection: () => void;
+  chromeOpen?: boolean;
+  onToggleChrome?: () => void;
 }) {
   const { fitView } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<EntityData>>([]);
@@ -313,25 +317,30 @@ function GraphInner({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-3">
-        <div className="label">Knowledge graph</div>
-        <div className="flex gap-1">
-          <GraphButton onClick={onToggleExpand} active={expanded}>
-            Expand
-          </GraphButton>
-          <GraphButton onClick={() => fitView({ padding: 0.22, duration: 300 })}>
-            Fit
-          </GraphButton>
-          <GraphButton
-            onClick={() => {
-              onResetSelection();
-              fitView({ padding: 0.22, duration: 300 });
-            }}
-          >
-            Reset
-          </GraphButton>
+      {chromeOpen && (
+        <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-3">
+          <div className="label">Knowledge graph</div>
+          <div className="flex gap-1">
+            <GraphButton onClick={onToggleExpand} active={expanded}>
+              Expand
+            </GraphButton>
+            <GraphButton onClick={() => fitView({ padding: 0.22, duration: 300 })}>
+              Fit
+            </GraphButton>
+            <GraphButton
+              onClick={() => {
+                onResetSelection();
+                fitView({ padding: 0.22, duration: 300 });
+              }}
+            >
+              Reset
+            </GraphButton>
+            {onToggleChrome && (
+              <GraphButton onClick={onToggleChrome}>Hide</GraphButton>
+            )}
+          </div>
         </div>
-      </div>
+      )}
       <div className="relative min-h-0 flex-1">
         <ReactFlow
           nodes={nodes}
@@ -383,6 +392,8 @@ export function KnowledgeGraph(props: {
   onSelectEntity: (id: string | null) => void;
   onToggleExpand: () => void;
   onResetSelection: () => void;
+  chromeOpen?: boolean;
+  onToggleChrome?: () => void;
 }) {
   return (
     <div className="h-full min-h-0 w-full">

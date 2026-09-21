@@ -1,4 +1,4 @@
-import { PixelComposeMotif, formatElapsed } from "@/components/PixelComposeMotif";
+import { formatElapsed } from "@/components/PixelComposeMotif";
 import type { RuntimeMode } from "@/lib/types";
 
 export function ModeBadge({
@@ -61,11 +61,7 @@ export function ResearchStatus({
 
   return (
     <div className="flex items-center gap-2 text-[12px] text-muted">
-      {status === "running" ? (
-        <PixelComposeMotif />
-      ) : (
-        <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
-      )}
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
       <span>Research</span>
       {elapsedMs != null && (
         <span className="font-mono text-[11px] text-dim">

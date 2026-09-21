@@ -67,8 +67,8 @@ export async function runResearch(
     ? normalizeSourcePolicy(options.sourcePolicy)
     : undefined;
   const session = sessionId
-    ? resumeOrThrow(sessionId, nextQuery)
-    : createSession(
+    ? await resumeOrThrow(sessionId, nextQuery)
+    : await createSession(
         requiredUserId(options?.userId),
         nextQuery,
         runtime.mode,
@@ -76,7 +76,7 @@ export async function runResearch(
       );
   if (incomingPolicy) {
     session.sourcePolicy = incomingPolicy;
-    persistSession(session);
+    await persistSession(session);
   }
   const policy = session.sourcePolicy;
   const extending = Boolean(sessionId);
@@ -456,8 +456,8 @@ function requiredUserId(userId: string | undefined): string {
   return userId;
 }
 
-function resumeOrThrow(sessionId: string, query: string): SessionRecord {
-  const session = resumeSession(sessionId, query) ?? getSession(sessionId);
+async function resumeOrThrow(sessionId: string, query: string): Promise<SessionRecord> {
+  const session = (await resumeSession(sessionId, query)) ?? (await getSession(sessionId));
   if (!session) {
     throw new Error("Research session not found");
   }
@@ -479,7 +479,7 @@ function recordDropped(
 ) {
   if (dropped.length === 0) return;
   session.droppedSources = mergeDropped(session.droppedSources, dropped);
-  persistSession(session);
+  void persistSession(session);
   const message = summarizeDropped(dropped);
   if (message) log(emit, session, message);
   const event = {

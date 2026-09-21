@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     const userId = session.metadata?.userId || session.client_reference_id;
     const credits = Number(session.metadata?.credits ?? CREDIT_PACK_SIZE);
     if (userId && Number.isFinite(credits) && credits > 0) {
-      creditAccount(userId, credits, "stripe_pack");
+      await creditAccount(userId, credits, "stripe_pack");
     }
   }
 

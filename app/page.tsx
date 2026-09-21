@@ -14,7 +14,7 @@ export default async function HomePage() {
     <HomeScreen
       user={user}
       stripeEnabled={stripeEnabled()}
-      graphs={listSessionsForUser(user.id)}
+      graphs={await listSessionsForUser(user.id)}
       availableDataSources={availableDataSources()}
     />
   );

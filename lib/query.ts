@@ -11,7 +11,7 @@ export async function queryGraph(
   sessionId: string,
   question: string,
 ): Promise<GraphQueryResponse> {
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
   if (!session) {
     throw new Error("Research session not found. Run research again.");
   }

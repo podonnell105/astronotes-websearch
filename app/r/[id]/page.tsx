@@ -2,6 +2,7 @@ import { availableDataSources } from "@/lib/config";
 import { ResearchWorkspace } from "@/components/ResearchWorkspace";
 import { getCurrentUser } from "@/lib/auth";
 import { stripeEnabled } from "@/lib/credits";
+import { remoteSessionView, useRemoteStore } from "@/lib/remote";
 import { getSession, toSessionView } from "@/lib/store";
 import { sourcePolicyFromSearchParams } from "@/lib/sources";
 import { notFound, redirect } from "next/navigation";
@@ -40,13 +41,19 @@ export default async function ResearchPage({
       />
     );
   }
-  const session = getSession(id);
-  if (!session || session.userId !== user.id) notFound();
+  const initialSession = useRemoteStore()
+    ? await remoteSessionView(id)
+    : await (async () => {
+        const session = await getSession(id);
+        if (!session || session.userId !== user.id) return null;
+        return toSessionView(session);
+      })();
+  if (!initialSession) notFound();
   return (
     <ResearchWorkspace
       user={user}
       stripeEnabled={stripeEnabled()}
-      initialSession={toSessionView(session)}
+      initialSession={initialSession}
       availableDataSources={catalog}
     />
   );

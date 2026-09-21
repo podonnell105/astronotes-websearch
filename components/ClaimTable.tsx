@@ -38,6 +38,8 @@ export function ClaimTable({
   sources,
   selectedRelationshipId,
   onSelect,
+  filtersOpen = true,
+  onToggleFilters,
 }: {
   entities: Entity[];
   relationships: Relationship[];
@@ -46,6 +48,8 @@ export function ClaimTable({
   sources: SearchResult[];
   selectedRelationshipId: string | null;
   onSelect: (relationshipId: string) => void;
+  filtersOpen?: boolean;
+  onToggleFilters?: () => void;
 }) {
   const [filter, setFilter] = useState<DecisionFilter>("ALL");
   const [status, setStatus] = useState<StatusFilter>("ALL");
@@ -67,6 +71,7 @@ export function ClaimTable({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas">
+      {filtersOpen && (
       <div className="flex shrink-0 flex-col gap-1 border-b border-line px-4 py-2">
         <div className="flex flex-wrap items-center gap-2">
           {FILTERS.map((item) => {
@@ -95,6 +100,16 @@ export function ClaimTable({
               </button>
             );
           })}
+          {onToggleFilters && (
+            <button
+              type="button"
+              onClick={onToggleFilters}
+              className="ml-auto border border-line px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:border-line-strong hover:text-ink"
+              title="Hide filters"
+            >
+              Hide
+            </button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {STATUSES.map((item) => {
@@ -129,6 +144,7 @@ export function ClaimTable({
           <div className="text-[11px] text-dim">{audit.warning}</div>
         )}
       </div>
+      )}
       <div className="min-h-0 flex-1 overflow-auto">
         {visible.length === 0 ? (
           <p className="px-5 py-8 text-[13px] text-dim">No claims in this filter.</p>

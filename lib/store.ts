@@ -1,4 +1,5 @@
 import { mutate, read } from "./db";
+import { remoteSessionList, useRemoteStore } from "./remote";
 import { emptySourcePolicy, hostIsDenied, normalizeSourcePolicy } from "./sources";
 import type {
   ChatTurn,
@@ -66,12 +67,12 @@ const PERSIST_EVENTS = new Set([
   "error",
 ]);
 
-export function createSession(
+export async function createSession(
   userId: string,
   query: string,
   mode: RuntimeMode,
   sourcePolicy: SourcePolicy = emptySourcePolicy(),
-): SessionRecord {
+): Promise<SessionRecord> {
   const session: SessionRecord = {
     id: crypto.randomUUID(),
     userId,
@@ -93,23 +94,26 @@ export function createSession(
     jevStatus: mode === "live" ? "jev" : "mock",
   };
   memory.set(session.id, session);
-  persistSession(session);
+  await persistSession(session);
   return session;
 }
 
-export function resumeSession(id: string, query: string): SessionRecord | undefined {
-  const session = getSession(id);
+export async function resumeSession(
+  id: string,
+  query: string,
+): Promise<SessionRecord | undefined> {
+  const session = await getSession(id);
   if (!session) return undefined;
   session.status = "running";
   session.queries.push(query);
-  persistSession(session);
+  await persistSession(session);
   return session;
 }
 
-export function getSession(id: string): SessionRecord | undefined {
+export async function getSession(id: string): Promise<SessionRecord | undefined> {
   const cached = memory.get(id);
   if (cached) return cached;
-  const loaded = loadSession(id);
+  const loaded = await loadSession(id);
   if (loaded) memory.set(id, loaded);
   return loaded;
 }
@@ -122,15 +126,15 @@ export function rememberEvent(session: SessionRecord, event: ResearchEvent) {
   if (event.type === "complete" || event.type === "error") {
     session.frozenAt = Date.now();
   }
-  if (PERSIST_EVENTS.has(event.type)) persistSession(session);
+  if (PERSIST_EVENTS.has(event.type)) void persistSession(session);
 }
 
-export function appendChat(session: SessionRecord, turns: ChatTurn[]) {
+export async function appendChat(session: SessionRecord, turns: ChatTurn[]) {
   session.chat.push(...turns);
-  persistSession(session);
+  await persistSession(session);
 }
 
-export function persistSession(session: SessionRecord) {
+export async function persistSession(session: SessionRecord) {
   const payload: Payload = {
     queries: session.queries,
     entities: [...session.entities.values()],
@@ -143,7 +147,7 @@ export function persistSession(session: SessionRecord) {
     events: session.events,
     chat: session.chat,
   };
-  mutate((store) => {
+  await mutate((store) => {
     const row = {
       id: session.id,
       user_id: session.userId,
@@ -205,7 +209,8 @@ export function parseSessionView(raw: string): SessionView {
   };
 }
 
-export function listSessionsForUser(userId: string): SessionSummary[] {
+export async function listSessionsForUser(userId: string): Promise<SessionSummary[]> {
+  if (useRemoteStore()) return remoteSessionList();
   return read((store) =>
     store.research_sessions
       .filter((row) => row.user_id === userId)
@@ -227,8 +232,8 @@ export function listSessionsForUser(userId: string): SessionSummary[] {
   );
 }
 
-function loadSession(id: string): SessionRecord | undefined {
-  const row = read((store) => store.research_sessions.find((item) => item.id === id));
+async function loadSession(id: string): Promise<SessionRecord | undefined> {
+  const row = await read((store) => store.research_sessions.find((item) => item.id === id));
   if (!row) return undefined;
 
   const payload = JSON.parse(row.payload) as Payload;

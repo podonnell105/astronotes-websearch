@@ -8,16 +8,16 @@ export class CreditError extends Error {
   status = 402;
 }
 
-export function getCredits(userId: string): number {
+export async function getCredits(userId: string): Promise<number> {
   return read((store) => store.users.find((user) => user.id === userId)?.credits ?? 0);
 }
 
-export function debitCredits(
+export async function debitCredits(
   userId: string,
   amount: number,
   reason: string,
   sessionId?: string,
-): AuthUser {
+): Promise<AuthUser> {
   return mutate((store) => {
     const row = store.users.find((user) => user.id === userId);
     if (!row) throw new CreditError("Account not found");
@@ -37,12 +37,12 @@ export function debitCredits(
   });
 }
 
-export function creditAccount(
+export async function creditAccount(
   userId: string,
   amount: number,
   reason: string,
   sessionId?: string,
-): AuthUser {
+): Promise<AuthUser> {
   return mutate((store) => {
     const row = store.users.find((user) => user.id === userId);
     if (!row) throw new CreditError("Account not found");
