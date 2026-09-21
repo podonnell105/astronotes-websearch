@@ -1,36 +1,29 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Astronotes
 
-## Getting Started
-
-First, run the development server:
+Search the live internet, extract a knowledge graph, validate claims with Jev, and interrogate the result.
 
 ```bash
+npm install
+cp .env.example .env.local
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+OPENAI_API_KEY=
+TAVILY_API_KEY=
+JEV_API_KEY=
+```
 
-## Learn More
+`TAVILY_API_KEY` is used for live web search. Without it, search falls back to OpenAI `web_search`. `JEV_API_KEY` is a TypeSafe / Jev key (`TYPESAFE_API_KEY` is also accepted).
 
-To learn more about Next.js, take a look at the following resources:
+## Modes
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **DEMO MODE** — no `OPENAI_API_KEY`. Uses a built-in lunar communications corpus and mock Jev decisions. The demo is labeled in the UI; mock validation is never presented as live Jev.
+- **PARTIAL** — OpenAI present, Jev missing. Live search (Tavily when configured) and extraction; mock Jev.
+- **LIVE** — OpenAI and Jev keys present. Tavily search (or OpenAI web search fallback) + extraction; Jev System One for claim classification and entity resolution.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The graph is the primary artifact. Follow-up questions are answered from the graph unless **Extend graph** is checked, in which case the question is searched on the live web and new evidence is linked to existing entities with Jev before answering.
