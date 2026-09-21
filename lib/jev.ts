@@ -21,9 +21,12 @@ export type JevResult = {
 };
 
 const CLAIM_CRITERIA = {
-  SUPPORTED: "The evidence directly supports the claim.",
-  CONTRADICTED: "The evidence contradicts the claim.",
-  UNCERTAIN: "The evidence is insufficient, off-topic, or ambiguous.",
+  SUPPORTED:
+    "The evidence snippet directly supports the claim as stated, including its operational status (deployed vs announced). For identity and role claims (founded, cofounded, CEO, chairman, partner, investor, educated_at), an encyclopedia, Wikipedia, or independent biography stating the role is enough. A first-party About or team page may support that identity sentence if it is a direct factual statement, not a product pitch. A press release or future intent is not enough to support a deployed contract or operations claim.",
+  CONTRADICTED:
+    "The evidence denies the claimed role, relationship, or status (for example: the named party is not the prime, not selected, or not operating).",
+  UNCERTAIN:
+    "The source is off-topic, too thin, page chrome, satire treated as fact, a laundry-list of names with no role, or an announcement used to back a deployed contract claim. Use this when the snippet does not clearly confirm or deny the claim as stated.",
 };
 
 const MATCH_CRITERIA = {
@@ -174,6 +177,7 @@ export async function classifyClaims(
     claim: string;
     evidence: string;
     sourceUrl?: string;
+    status?: string;
   }[],
 ): Promise<{ result: JevResult; usedMockFallback: boolean; error?: string }> {
   const questions: Record<string, JevChoiceQuestion> = {};
@@ -183,10 +187,11 @@ export async function classifyClaims(
       claim: item.claim,
       evidence: item.evidence,
       source_url: item.sourceUrl ?? null,
+      status: item.status ?? "unclear",
     };
     questions[item.id] = {
       type: "choice",
-      instructions: `Does the evidence in claims.${item.id}.evidence support the claim in claims.${item.id}.claim?`,
+      instructions: `Does the evidence in claims.${item.id}.evidence directly support the claim in claims.${item.id}.claim, including the claimed status in claims.${item.id}.status? Mark SUPPORTED only if the snippet backs the claim as stated. Identity facts (founded, CEO, partner, educated_at) from Wikipedia, Britannica, or an independent bio are SUPPORTED. Mark CONTRADICTED if the snippet denies the role. Mark UNCERTAIN if the source is off-topic chrome, satire, a name list with no role, or an announcement used to support a deployed contract claim.`,
       criteria: CLAIM_CRITERIA,
     };
   }
@@ -296,13 +301,14 @@ function mockEvaluate(
     const item = (claims[id] ?? {}) as Record<string, unknown>;
     const claim = String(item.claim ?? "");
     const evidence = String(item.evidence ?? "");
-    answers[id] = mockClaimDecision(claim, evidence);
+    const status = String(item.status ?? "unclear");
+    answers[id] = mockClaimDecision(claim, evidence, status);
   }
 
   return { model: "mock", answers };
 }
 
-function mockClaimDecision(claim: string, evidence: string): JevAnswer {
+function mockClaimDecision(claim: string, evidence: string, status = "unclear"): JevAnswer {
   const c = claim.toLowerCase();
   const e = evidence.toLowerCase();
   const claimTokens = tokens(c);
@@ -312,12 +318,23 @@ function mockClaimDecision(claim: string, evidence: string): JevAnswer {
     /prime partner|entire artemis|prime developer|supplies the lunar surface/.test(c);
   const denied =
     /not the prime|not confirmed|is not/.test(e) && overstated;
+  const announcementOnly =
+    /selected|will |intended|announce|to develop and deploy|award/.test(e);
+  const operational =
+    /operating|in service|launched|on-orbit|on-surface|already delivering/.test(e);
 
   if (denied) {
     return dist("CONTRADICTED", {
       SUPPORTED: 0.08,
       CONTRADICTED: 0.81,
       UNCERTAIN: 0.11,
+    });
+  }
+  if (status === "deployed" && announcementOnly && !operational) {
+    return dist("UNCERTAIN", {
+      SUPPORTED: 0.18,
+      CONTRADICTED: 0.12,
+      UNCERTAIN: 0.7,
     });
   }
   if (overstated || ratio < 0.35) {

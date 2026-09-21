@@ -1,3 +1,5 @@
+import type { DataSourceId } from "./dataCatalog";
+import { DATA_CATALOG, DATA_SOURCE_IDS } from "./dataCatalog";
 import type { RuntimeMode, SearchProvider } from "./types";
 
 export function hasOpenAI(): boolean {
@@ -41,4 +43,26 @@ export function detectRuntime(): {
 
 export function nowStamp(): string {
   return new Date().toLocaleTimeString("en-GB", { hour12: false });
+}
+
+export function dataSourceAvailability(): Record<DataSourceId, boolean> {
+  const companiesHouse = Boolean(process.env.COMPANIES_HOUSE_API_KEY?.trim());
+  const patents = Boolean(process.env.PATENTSVIEW_API_KEY?.trim());
+  const sam = Boolean(process.env.SAM_API_KEY?.trim());
+  const sanctions = Boolean(process.env.OPENSANCTIONS_API_KEY?.trim());
+  const availability = {} as Record<DataSourceId, boolean>;
+  for (const id of DATA_SOURCE_IDS) {
+    const def = DATA_CATALOG.find((item) => item.id === id);
+    if (def?.needsEnv === "COMPANIES_HOUSE_API_KEY") availability[id] = companiesHouse;
+    else if (def?.needsEnv === "PATENTSVIEW_API_KEY") availability[id] = patents;
+    else if (def?.needsEnv === "SAM_API_KEY") availability[id] = sam;
+    else if (def?.needsEnv === "OPENSANCTIONS_API_KEY") availability[id] = sanctions;
+    else availability[id] = true;
+  }
+  return availability;
+}
+
+export function availableDataSources(): DataSourceId[] {
+  const availability = dataSourceAvailability();
+  return DATA_SOURCE_IDS.filter((id) => availability[id]);
 }

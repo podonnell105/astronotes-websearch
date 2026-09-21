@@ -1,6 +1,8 @@
 import { mutate, read } from "./db";
+import { emptySourcePolicy, hostIsDenied, normalizeSourcePolicy } from "./sources";
 import type {
   ChatTurn,
+  DroppedSource,
   EvidenceRecord,
   Entity,
   Relationship,
@@ -9,8 +11,10 @@ import type {
   SearchResult,
   SessionSummary,
   SessionView,
+  SourcePolicy,
   Validation,
 } from "./types";
+import { normalizeRelationshipStatus } from "./types";
 
 export type SessionRecord = {
   id: string;
@@ -25,6 +29,8 @@ export type SessionRecord = {
   validations: Map<string, Validation>;
   evidence: Map<string, EvidenceRecord>;
   sources: SearchResult[];
+  sourcePolicy: SourcePolicy;
+  droppedSources: DroppedSource[];
   events: ResearchEvent[];
   chat: ChatTurn[];
   status: "running" | "complete" | "error";
@@ -38,6 +44,8 @@ type Payload = {
   validations: [string, Validation][];
   evidence: [string, EvidenceRecord][];
   sources: SearchResult[];
+  sourcePolicy?: SourcePolicy;
+  droppedSources?: DroppedSource[];
   events: ResearchEvent[];
   chat: ChatTurn[];
 };
@@ -53,6 +61,7 @@ const PERSIST_EVENTS = new Set([
   "relationship",
   "validation",
   "evidence",
+  "dropped_sources",
   "complete",
   "error",
 ]);
@@ -61,6 +70,7 @@ export function createSession(
   userId: string,
   query: string,
   mode: RuntimeMode,
+  sourcePolicy: SourcePolicy = emptySourcePolicy(),
 ): SessionRecord {
   const session: SessionRecord = {
     id: crypto.randomUUID(),
@@ -75,6 +85,8 @@ export function createSession(
     validations: new Map(),
     evidence: new Map(),
     sources: [],
+    sourcePolicy,
+    droppedSources: [],
     events: [],
     chat: [],
     status: "running",
@@ -126,6 +138,8 @@ export function persistSession(session: SessionRecord) {
     validations: [...session.validations.entries()],
     evidence: [...session.evidence.entries()],
     sources: session.sources,
+    sourcePolicy: session.sourcePolicy,
+    droppedSources: session.droppedSources,
     events: session.events,
     chat: session.chat,
   };
@@ -167,6 +181,8 @@ export function toSessionView(session: SessionRecord): SessionView {
     validations: Object.fromEntries(session.validations),
     evidence: Object.fromEntries(session.evidence),
     sources: session.sources,
+    sourcePolicy: session.sourcePolicy,
+    droppedSources: session.droppedSources,
     logs,
     chat: session.chat,
     status: session.status,
@@ -181,7 +197,12 @@ export function toSessionView(session: SessionRecord): SessionView {
 }
 
 export function parseSessionView(raw: string): SessionView {
-  return JSON.parse(raw) as SessionView;
+  const parsed = JSON.parse(raw) as SessionView;
+  return {
+    ...parsed,
+    sourcePolicy: normalizeSourcePolicy(parsed.sourcePolicy),
+    droppedSources: parsed.droppedSources ?? [],
+  };
 }
 
 export function listSessionsForUser(userId: string): SessionSummary[] {
@@ -221,11 +242,24 @@ function loadSession(id: string): SessionRecord | undefined {
     frozenAt: row.frozen_at,
     entities: new Map((payload.entities ?? []).map((entity) => [entity.id, entity])),
     relationships: new Map(
-      (payload.relationships ?? []).map((rel) => [rel.id, rel]),
+      (payload.relationships ?? []).map((rel) => [
+        rel.id,
+        { ...rel, status: normalizeRelationshipStatus(rel.status) },
+      ]),
     ),
     validations: new Map(payload.validations ?? []),
-    evidence: new Map(payload.evidence ?? []),
-    sources: payload.sources ?? [],
+    evidence: new Map(
+      (payload.evidence ?? []).map(([id, record]) => [
+        id,
+        {
+          ...record,
+          sources: (record.sources ?? []).filter((source) => !hostIsDenied(source.url)),
+        },
+      ]),
+    ),
+    sources: (payload.sources ?? []).filter((source) => !hostIsDenied(source.url)),
+    sourcePolicy: normalizeSourcePolicy(payload.sourcePolicy),
+    droppedSources: payload.droppedSources ?? [],
     events: payload.events ?? [],
     chat: payload.chat ?? [],
     status: row.status,

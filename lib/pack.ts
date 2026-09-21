@@ -1,14 +1,23 @@
 import {
   buildClaimRows,
+  claimAuditSummary,
   decisionCounts,
   formatAsOf,
+  formatPublished,
+  statusCounts,
   type ClaimRow,
 } from "./claims";
-import type { SessionView } from "./types";
+import { isCatalogHost } from "./dataCatalog";
+import { formatSourcePolicy, hostnameOf } from "./sources";
+import type { RelationshipStatus, SessionView } from "./types";
+
+const STATUS_SECTIONS: RelationshipStatus[] = ["deployed", "announced", "unclear"];
 
 export function buildPackMarkdown(view: SessionView): string {
   const rows = buildClaimRows(view);
   const counts = decisionCounts(rows);
+  const statuses = statusCounts(rows);
+  const audit = claimAuditSummary(counts);
   const gaps = rows.filter(
     (row) =>
       row.decision === "UNCERTAIN" ||
@@ -16,6 +25,7 @@ export function buildPackMarkdown(view: SessionView): string {
       row.decision === "PENDING",
   );
   const unanswered = unansweredFromChat(view);
+  const dropped = view.droppedSources ?? [];
 
   const lines = [
     `# Astronotes evidence pack`,
@@ -25,17 +35,42 @@ export function buildPackMarkdown(view: SessionView): string {
     `Mode: ${view.mode}`,
     `Jev: ${view.jevStatus === "jev" ? "live" : "mock"}`,
     `Sources: ${view.stats.sources} · Entities: ${view.stats.entities} · Claims: ${rows.length}`,
-    `Supported ${counts.SUPPORTED} · Uncertain ${counts.UNCERTAIN} · Contradicted ${counts.CONTRADICTED} · Pending ${counts.PENDING}`,
-    ``,
-    `## Claims`,
-    ``,
-    `| Decision | ${esc("Actor")} | Relation | ${esc("Actor")} | Claim | Confidence | Validator | Source | Published |`,
-    `| --- | --- | --- | --- | --- | --- | --- | --- | --- |`,
-    ...rows.map(markdownRow),
-    ``,
-    `## Gaps`,
+    `Status: deployed ${statuses.deployed} · announced ${statuses.announced} · unclear ${statuses.unclear}`,
+    audit.line,
+    ...(audit.warning ? [audit.warning] : []),
+    `Source policy: ${formatSourcePolicy(view.sourcePolicy)}`,
+    ...primaryCoverLines(view.sources),
     ``,
   ];
+
+  if (dropped.length > 0) {
+    lines.push(`Dropped sources: ${dropped.length}`);
+    for (const item of dropped) {
+      lines.push(
+        `- ${hostnameOf(item.url) || item.url} — ${item.reason.replace(/_/g, " ")} (${item.url})`,
+      );
+    }
+    lines.push("");
+  }
+
+  for (const status of STATUS_SECTIONS) {
+    const section = rows.filter((row) => row.status === status);
+    lines.push(`## ${titleCase(status)}`);
+    lines.push("");
+    if (section.length === 0) {
+      lines.push("None.");
+      lines.push("");
+      continue;
+    }
+    lines.push(
+      `| Decision | ${esc("Actor")} | Relation | ${esc("Actor")} | Claim | Confidence | Validator | Sources | Published |`,
+    );
+    lines.push(`| --- | --- | --- | --- | --- | --- | --- | --- | --- |`);
+    for (const row of section) lines.push(markdownRow(row));
+    lines.push("");
+  }
+
+  lines.push(`## Gaps`, ``);
 
   if (gaps.length === 0 && unanswered.length === 0) {
     lines.push("No uncertain, contradicted, or pending claims.");
@@ -57,6 +92,7 @@ export function buildPackCsv(view: SessionView): string {
   const rows = buildClaimRows(view);
   const header = [
     "decision",
+    "status",
     "source",
     "relation",
     "target",
@@ -65,11 +101,13 @@ export function buildPackCsv(view: SessionView): string {
     "validator",
     "snippet",
     "url",
+    "extraUrls",
     "publishedAt",
   ];
   const body = rows.map((row) =>
     [
       row.decision,
+      row.status,
       row.sourceName,
       row.type,
       row.targetName,
@@ -78,6 +116,7 @@ export function buildPackCsv(view: SessionView): string {
       row.model,
       row.snippet,
       row.url ?? "",
+      row.extraUrls.join(" "),
       row.publishedAt ?? "",
     ]
       .map(csvCell)
@@ -89,7 +128,30 @@ export function buildPackCsv(view: SessionView): string {
 function markdownRow(row: ClaimRow): string {
   const confidence =
     row.confidence == null ? "" : `${Math.round(row.confidence * 100)}%`;
-  return `| ${row.decision} | ${esc(row.sourceName)} | ${esc(row.type)} | ${esc(row.targetName)} | ${esc(row.claim)} | ${confidence} | ${row.model} | ${row.url ?? ""} | ${row.publishedAt ?? ""} |`;
+  const urls = [row.url, ...row.extraUrls].filter(Boolean).join(" ");
+  return `| ${row.decision} | ${esc(row.sourceName)} | ${esc(row.type)} | ${esc(row.targetName)} | ${esc(row.claim)} | ${confidence} | ${row.model} | ${esc(urls)} | ${formatPublished(row.publishedAt)} |`;
+}
+
+function primaryCoverLines(sources: SessionView["sources"]): string[] {
+  const primary = sources.filter((source) => isCatalogHost(source.url));
+  if (primary.length === 0) return [];
+  const byHost = new Map<string, number>();
+  for (const source of primary) {
+    const host = hostnameOf(source.url) || "record";
+    byHost.set(host, (byHost.get(host) ?? 0) + 1);
+  }
+  const summary = [...byHost.entries()]
+    .map(([host, count]) => `${count} ${host}`)
+    .join(" · ");
+  const lines = [`Primary records: ${primary.length} (${summary})`];
+  for (const source of primary) {
+    lines.push(`- ${source.title} — ${source.url}`);
+  }
+  return lines;
+}
+
+function titleCase(value: string): string {
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
 }
 
 function esc(value: string): string {

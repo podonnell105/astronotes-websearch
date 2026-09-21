@@ -89,6 +89,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "nokia",
     type: "partners_with",
     claim: "NASA is working with Nokia on lunar communications.",
+    status: "announced",
     sourceUrl: "https://www.nasa.gov/news/lunar-4g-nokia",
     evidenceSnippet:
       "NASA selected Nokia to develop and deploy the first cellular network on the lunar surface to support Artemis astronauts and autonomous systems.",
@@ -99,6 +100,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "lunar-communications",
     type: "develops",
     claim: "Nokia is developing lunar communications infrastructure.",
+    status: "announced",
     sourceUrl: "https://www.nokia.com/about/news/lunar-communications",
     evidenceSnippet:
       "Nokia Bell Labs is building a space-grade LTE/4G network intended to provide voice, video, and telemetry between lunar landers, rovers, and habitat systems.",
@@ -109,6 +111,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "lunar-communications",
     type: "develops",
     claim: "Nokia Bell Labs is building a space-grade lunar LTE/4G network.",
+    status: "announced",
     sourceUrl: "https://www.nokia.com/about/news/lunar-communications",
     evidenceSnippet:
       "Nokia Bell Labs is building a space-grade LTE/4G network intended to provide voice, video, and telemetry between lunar landers, rovers, and habitat systems.",
@@ -119,6 +122,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "artemis",
     type: "operates",
     claim: "NASA operates the Artemis lunar exploration program.",
+    status: "deployed",
     sourceUrl: "https://www.nasa.gov/artemis",
     evidenceSnippet:
       "Artemis will land astronauts near the lunar south pole and requires surface communications, navigation, and data relay as core infrastructure.",
@@ -129,6 +133,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "lunar-communications",
     type: "uses",
     claim: "Artemis depends on lunar communications infrastructure.",
+    status: "announced",
     sourceUrl: "https://www.nasa.gov/artemis",
     evidenceSnippet:
       "Artemis will land astronauts near the lunar south pole and requires surface communications, navigation, and data relay as core infrastructure.",
@@ -139,6 +144,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "spacex",
     type: "works_with",
     claim: "NASA is working with SpaceX on Artemis human landing.",
+    status: "announced",
     sourceUrl: "https://www.spacex.com/updates/artemis-hls",
     evidenceSnippet:
       "SpaceX is developing Starship as NASA's Human Landing System, creating a demand for high-bandwidth links between lunar orbit, the surface, and Earth.",
@@ -149,6 +155,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "lunar-communications",
     type: "funds",
     claim: "NASA is funding lunar communications as Artemis infrastructure.",
+    status: "announced",
     sourceUrl: "https://www.reuters.com/technology/lunar-communications",
     evidenceSnippet:
       "NASA's Artemis program has become a catalyst for commercial lunar communications, with Nokia's cellular payload and SpaceX's lander driving near-term infrastructure.",
@@ -159,6 +166,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "nasa",
     type: "supplies",
     claim: "Lockheed Martin supplies NASA with the Orion crew vehicle.",
+    status: "deployed",
     sourceUrl: "https://www.lockheedmartin.com/en-us/products/orion.html",
     evidenceSnippet:
       "Lockheed Martin builds the Orion crew vehicle for Artemis and has studied lunar relay architectures, but it is not the prime vendor for surface cellular infrastructure.",
@@ -169,6 +177,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "nasa",
     type: "works_with",
     claim: "Lockheed Martin works with NASA on Artemis crew systems.",
+    status: "deployed",
     sourceUrl: "https://www.lockheedmartin.com/en-us/products/orion.html",
     evidenceSnippet:
       "Lockheed Martin builds the Orion crew vehicle for Artemis and has studied lunar relay architectures, but it is not the prime vendor for surface cellular infrastructure.",
@@ -179,6 +188,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "artemis",
     type: "launches",
     claim: "SpaceX launches the entire Artemis program.",
+    status: "unclear",
     sourceUrl: "https://www.spacex.com/updates/artemis-hls",
     evidenceSnippet:
       "SpaceX is developing Starship as NASA's Human Landing System, creating a demand for high-bandwidth links between lunar orbit, the surface, and Earth.",
@@ -189,6 +199,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "nasa",
     type: "partners_with",
     claim: "Intelsat is NASA's prime partner for lunar surface communications.",
+    status: "announced",
     sourceUrl: "https://www.intelsat.com/news/space-communications",
     evidenceSnippet:
       "Intelsat operates a large geostationary communications fleet and has partnered with NASA on Earth-orbit services; a dedicated lunar surface network is not confirmed.",
@@ -199,6 +210,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "lunar-communications",
     type: "supplies",
     claim: "Intelsat supplies the lunar surface cellular network.",
+    status: "announced",
     sourceUrl: "https://www.intelsat.com/news/space-communications",
     evidenceSnippet:
       "Intelsat operates a large geostationary communications fleet and has partnered with NASA on Earth-orbit services; a dedicated lunar surface network is not confirmed.",
@@ -209,6 +221,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "lunar-communications",
     type: "develops",
     claim: "Lockheed Martin is the prime developer of lunar cellular infrastructure.",
+    status: "announced",
     sourceUrl: "https://www.lockheedmartin.com/en-us/products/orion.html",
     evidenceSnippet:
       "Lockheed Martin builds the Orion crew vehicle for Artemis and has studied lunar relay architectures, but it is not the prime vendor for surface cellular infrastructure.",
@@ -219,6 +232,7 @@ export const DEMO_RELATIONSHIPS: Relationship[] = [
     target: "lunar-communications",
     type: "uses",
     claim: "SpaceX landers will use lunar communications links.",
+    status: "announced",
     sourceUrl: "https://www.reuters.com/technology/lunar-communications",
     evidenceSnippet:
       "NASA's Artemis program has become a catalyst for commercial lunar communications, with Nokia's cellular payload and SpaceX's lander driving near-term infrastructure.",

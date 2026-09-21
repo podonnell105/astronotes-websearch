@@ -1,7 +1,8 @@
 "use client";
 
 import { PixelComposeMotif, formatElapsed } from "@/components/PixelComposeMotif";
-import type { ChatTurn } from "@/lib/types";
+import { linkifyEntityText } from "@/lib/entityLinks";
+import type { ChatTurn, Entity } from "@/lib/types";
 import { useEffect, useRef, useState } from "react";
 
 export function ChatPanel({
@@ -10,22 +11,24 @@ export function ChatPanel({
   messages,
   loading,
   error,
+  entities,
   selectedEntityId,
   selectedRelationshipId,
   onSelectEdge,
+  onSelectEntity,
 }: {
   disabled?: boolean;
   onAsk: (question: string, options: { extend: boolean }) => void;
   messages: ChatTurn[];
   loading: boolean;
   error: string | null;
+  entities: Entity[];
   selectedEntityId: string | null;
   selectedRelationshipId: string | null;
   onSelectEdge: (relationshipId: string) => void;
+  onSelectEntity: (id: string | null) => void;
 }) {
-  const [question, setQuestion] = useState(
-    "Which companies connect NASA and SpaceX?",
-  );
+  const [question, setQuestion] = useState("");
   const [extend, setExtend] = useState(false);
   const startedAt = useRef<number | null>(null);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
@@ -69,7 +72,7 @@ export function ChatPanel({
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {messages.length === 0 && !loading && (
           <p className="text-[13px] leading-6 text-dim">
-            Ask a question. Cited edges appear as context and light up on the graph when selected.
+            Ask a question. Entity names in the answer are links to graph nodes. Cited edges light up when selected.
           </p>
         )}
         <div className="space-y-4">
@@ -79,9 +82,19 @@ export function ChatPanel({
               {msg.role === "assistant" && msg.model === "mock" && (
                 <span className="label text-warn">Demo answer · graph only</span>
               )}
-              <p className="whitespace-pre-wrap text-[13px] leading-5 text-muted">
-                {msg.text}
-              </p>
+              {msg.role === "assistant" ? (
+                <LinkedAnswer
+                  text={msg.text}
+                  entities={entities}
+                  preferredIds={msg.references?.map((ref) => ref.entityId) ?? []}
+                  selectedEntityId={selectedEntityId}
+                  onSelectEntity={onSelectEntity}
+                />
+              ) : (
+                <p className="whitespace-pre-wrap text-[13px] leading-5 text-muted">
+                  {msg.text}
+                </p>
+              )}
               {msg.role === "assistant" && (msg.edgeReferences?.length ?? 0) > 0 && (
                 <div>
                   <div className="label mb-1.5">Context</div>
@@ -163,5 +176,44 @@ export function ChatPanel({
         </div>
       </form>
     </aside>
+  );
+}
+
+function LinkedAnswer({
+  text,
+  entities,
+  preferredIds,
+  selectedEntityId,
+  onSelectEntity,
+}: {
+  text: string;
+  entities: Entity[];
+  preferredIds: string[];
+  selectedEntityId: string | null;
+  onSelectEntity: (id: string) => void;
+}) {
+  const segments = linkifyEntityText(text, entities, preferredIds);
+  return (
+    <p className="whitespace-pre-wrap text-[13px] leading-5 text-muted">
+      {segments.map((segment, index) => {
+        if (segment.type === "text") {
+          return <span key={`t-${index}`}>{segment.text}</span>;
+        }
+        const active = selectedEntityId === segment.entityId;
+        return (
+          <a
+            key={`e-${index}-${segment.entityId}`}
+            href={`#node/${segment.entityId}`}
+            className={`chat-entity-link ${active ? "chat-entity-link--active" : ""}`}
+            onClick={(event) => {
+              event.preventDefault();
+              onSelectEntity(segment.entityId);
+            }}
+          >
+            {segment.text}
+          </a>
+        );
+      })}
+    </p>
   );
 }

@@ -2,12 +2,13 @@ import { requireUser } from "@/lib/auth";
 import { debitCredits, RESEARCH_CREDIT_COST } from "@/lib/credits";
 import { apiError } from "@/lib/http";
 import { runResearch } from "@/lib/pipeline";
+import { normalizeSourcePolicy } from "@/lib/sources";
 import { getSession } from "@/lib/store";
 import type { ResearchEvent } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   try {
@@ -16,6 +17,7 @@ export async function POST(request: Request) {
       query?: string;
       sessionId?: string;
       preferExistingLinks?: boolean;
+      sourcePolicy?: unknown;
     };
     const query = (body.query ?? "").trim();
     if (!query) {
@@ -47,6 +49,7 @@ export async function POST(request: Request) {
           await runResearch(query, emit, sessionId, {
             preferExistingLinks,
             userId: user.id,
+            sourcePolicy: normalizeSourcePolicy(body.sourcePolicy),
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Research failed";

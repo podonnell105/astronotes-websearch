@@ -1,3 +1,5 @@
+import { formatPublished } from "@/lib/claims";
+import { hostnameOf } from "@/lib/sources";
 import type { Entity, EvidenceRecord, Relationship, Validation } from "@/lib/types";
 
 export function EvidencePanel({
@@ -25,6 +27,11 @@ export function EvidencePanel({
   }
 
   const validation: Validation | undefined = evidence?.validation;
+  const sources = evidence?.sources.length
+    ? evidence.sources
+    : relationship.sourceUrl
+      ? [{ title: relationship.sourceUrl, url: relationship.sourceUrl, snippet: "" }]
+      : [];
 
   return (
     <aside className="flex h-full min-h-0 flex-col border-l border-line bg-panel">
@@ -56,44 +63,40 @@ export function EvidencePanel({
             value={validation?.model === "jev" ? "Jev (live)" : "Mock / demo"}
             tone={validation?.model === "jev" ? "live" : "warn"}
           />
+          <Meta label="Status" value={relationship.status} />
         </div>
 
         <section className="mt-8">
-          <div className="label mb-3">Evidence</div>
+          <div className="label mb-3">Primary excerpt</div>
           <p className="text-[13px] leading-6 text-muted">
             “{evidence?.snippet || relationship.evidenceSnippet || relationship.claim}”
           </p>
-          {primaryUrl(relationship, evidence) && (
-            <a
-              href={primaryUrl(relationship, evidence)}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-3 inline-block font-mono text-[11px] uppercase tracking-[0.12em] text-accent hover:text-ink"
-            >
-              Open source
-            </a>
-          )}
         </section>
 
         <section className="mt-8">
           <div className="label mb-3">Sources</div>
-          <ol className="space-y-2">
-            {(evidence?.sources.length
-              ? evidence.sources
-              : relationship.sourceUrl
-                ? [{ title: relationship.sourceUrl, url: relationship.sourceUrl, snippet: "" }]
-                : []
-            ).map((sourceItem, index) => (
-              <li key={sourceItem.url} className="flex gap-2 text-[13px] text-muted">
-                <span className="font-mono text-[11px] text-dim">{index + 1}.</span>
-                <a
-                  href={sourceItem.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="hover:text-ink"
-                >
-                  {sourceItem.source || sourceItem.title}
-                </a>
+          <ol className="space-y-4">
+            {sources.map((sourceItem, index) => (
+              <li key={sourceItem.url} className="text-[13px] text-muted">
+                <div className="flex gap-2">
+                  <span className="font-mono text-[11px] text-dim">{index + 1}.</span>
+                  <a
+                    href={sourceItem.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono text-[11px] uppercase tracking-[0.12em] text-accent hover:text-ink"
+                  >
+                    {sourceItem.source || hostnameOf(sourceItem.url) || sourceItem.title}
+                  </a>
+                </div>
+                <div className="mt-1 pl-5 font-mono text-[10px] text-dim">
+                  {formatPublished(sourceItem.publishedAt)}
+                </div>
+                {sourceItem.snippet && (
+                  <p className="mt-1 pl-5 text-[12px] leading-5 text-dim">
+                    “{sourceItem.snippet}”
+                  </p>
+                )}
               </li>
             ))}
           </ol>
@@ -128,8 +131,4 @@ function Meta({
 
 function formatPct(value: number) {
   return `${Math.round(value * 100)}%`;
-}
-
-function primaryUrl(relationship: Relationship, evidence?: EvidenceRecord) {
-  return evidence?.sources[0]?.url || relationship.sourceUrl;
 }

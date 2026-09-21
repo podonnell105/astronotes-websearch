@@ -1,7 +1,14 @@
 import { hasOpenAI, hasTavily } from "./config";
 import { DEMO_SEARCH_RESULTS } from "./demo";
 import { SEARCH_MODELS } from "./models";
-import type { SearchProvider, SearchResult } from "./types";
+import {
+  applySourcePolicy,
+  MIN_KEEP,
+  tavilyExcludeDomains,
+  tavilyIncludeDomains,
+} from "./sources";
+import { rankSearchResults } from "./sourceQuality";
+import type { DroppedSource, SearchProvider, SearchResult, SourcePolicy } from "./types";
 
 const MAX_RESULTS = 12;
 const PAGE_TIMEOUT_MS = 4000;
@@ -23,14 +30,152 @@ export type SearchContext = {
   knownEntities?: KnownEntity[];
   excludeUrls?: string[];
   gaps?: string[];
+  broaden?: boolean;
+  policy?: SourcePolicy;
 };
 
 export type SearchOutcome = {
   results: SearchResult[];
   provider: SearchProvider;
+  dropped: DroppedSource[];
+  recovered?: boolean;
 };
 
+const MAX_SEARCH_TOKENS = 12;
+
+const SEARCH_STOP = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "do",
+  "does",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "how",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "of",
+  "on",
+  "or",
+  "that",
+  "the",
+  "their",
+  "there",
+  "these",
+  "this",
+  "those",
+  "to",
+  "was",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "with",
+  "versus",
+  "vs",
+  "he",
+  "she",
+  "him",
+  "his",
+  "her",
+  "they",
+  "them",
+  "we",
+  "our",
+  "you",
+  "your",
+  "i",
+  "me",
+  "my",
+  "did",
+  "doing",
+  "involved",
+  "involvement",
+  "setup",
+  "connected",
+  "connection",
+  "connections",
+  "relationship",
+  "relationships",
+  "public",
+  "evidence",
+  "evidenced",
+]);
+
+const SEARCH_WRAPPERS = [
+  /\bwhich relationships have public evidence\b/gi,
+  /\bhow are\b/gi,
+  /\bconnected on\b/gi,
+  /\band which\b/gi,
+];
+
+export function compactSearchQuery(question: string): string {
+  let text = question.trim();
+  for (const wrapper of SEARCH_WRAPPERS) text = text.replace(wrapper, " ");
+  const tokens = text
+    .replace(/[?!,;:()]+/g, " ")
+    .split(/\s+/)
+    .map((token) => token.replace(/^["']+|["']+$/g, ""))
+    .filter(Boolean);
+  const kept: string[] = [];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    const key = token.toLowerCase();
+    if (SEARCH_STOP.has(key) || key.length < 2 || seen.has(key)) continue;
+    seen.add(key);
+    kept.push(token);
+    if (kept.length >= MAX_SEARCH_TOKENS) break;
+  }
+  return (kept.join(" ") || question.trim()).slice(0, TAVILY_QUERY_LIMIT);
+}
+
+const BIO_INTENT =
+  /\b(who is|who's|who was|what does|what do|what is he|what is she|involved in|biography|background|profile)\b/i;
+
+/** Compact the question and, for bio/involvement asks, bias Tavily toward encyclopedic hits. */
+export function strategicSearchQuery(question: string): string {
+  const compact = compactSearchQuery(question);
+  if (!BIO_INTENT.test(question)) return compact;
+  if (/\bbiograph/i.test(compact)) return compact;
+  const tokens = compact.split(/\s+/).filter(Boolean);
+  if (tokens.length < 2 || tokens.length > 6) return compact;
+  return `${compact} biography`.slice(0, TAVILY_QUERY_LIMIT);
+}
+
+export function nameOnlySearchQuery(question: string): string {
+  const names = [...question.matchAll(/\b[A-Z][A-Za-z0-9]{1,}\b/g)]
+    .map((match) => match[0])
+    .filter((name) => !SEARCH_STOP.has(name.toLowerCase()));
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(name);
+  }
+  return (unique.slice(0, 8).join(" ") || compactSearchQuery(question)).slice(
+    0,
+    TAVILY_QUERY_LIMIT,
+  );
+}
+
 const pageTextCache = new Map<string, string>();
+const pageMetaCache = new Map<string, { text: string; publishedAt?: string }>();
 const searchResultCache = new Map<string, SearchResult[]>();
 
 export function rankKnownEntities(
@@ -72,21 +217,101 @@ export async function searchWeb(
   query: string,
   context: SearchContext = {},
 ): Promise<SearchOutcome> {
-  if (!hasOpenAI()) {
-    return { results: applySearchContext(DEMO_SEARCH_RESULTS, context), provider: "mock" };
+  if (context.policy?.onlyUrls.length) {
+    const pinned = context.policy.onlyUrls.map((url) => ({
+      title: hostname(url) || url,
+      url,
+      snippet: "",
+      source: hostname(url),
+    }));
+    return finishSearch(applySearchContext(pinned, context), "mock", context);
   }
+
+  if (!hasOpenAI()) {
+    return finishSearch(
+      applySearchContext(DEMO_SEARCH_RESULTS, context),
+      "mock",
+      context,
+    );
+  }
+
+  const compact = compactSearchQuery(query);
+  const names = nameOnlySearchQuery(query);
 
   if (hasTavily()) {
     try {
-      const results = applySearchContext(await searchWithTavily(query, context), context);
-      return { results, provider: "tavily" };
+      const collected: SearchResult[] = [];
+      const ingestTavily = async (q: string) => {
+        const hits = applySearchContext(await searchWithTavily(q, context), context);
+        collected.push(...hits);
+        return applySourcePolicy(mergeResults(collected), context.policy).results;
+      };
+
+      let allowed = await ingestTavily(query);
+      if (allowed.length < MIN_KEEP && compact !== query) {
+        allowed = await ingestTavily(compact);
+      }
+      if (
+        allowed.length < MIN_KEEP &&
+        names !== compact &&
+        names !== query
+      ) {
+        allowed = await ingestTavily(names);
+      }
+
+      const shouldMergeOpenAI = Boolean(context.broaden) || allowed.length < MIN_KEEP;
+      if (shouldMergeOpenAI) {
+        try {
+          const openaiHits = applySearchContext(
+            await searchWithOpenAI(names || compact || query, context),
+            context,
+          );
+          collected.push(...openaiHits);
+          return finishSearch(
+            mergeResults(collected),
+            allowed.length > 0 ? "tavily" : "openai",
+            context,
+            true,
+          );
+        } catch {
+          // Keep whatever Tavily already returned.
+        }
+      }
+
+      if (collected.length > 0) {
+        return finishSearch(mergeResults(collected), "tavily", context);
+      }
     } catch {
       // Fall through to OpenAI web_search.
     }
   }
 
-  const results = applySearchContext(await searchWithOpenAI(query, context), context);
-  return { results, provider: "openai" };
+  const results = applySearchContext(
+    await searchWithOpenAI(compact || query, context),
+    context,
+  );
+  return finishSearch(results, "openai", context, Boolean(context.broaden));
+}
+
+function finishSearch(
+  results: SearchResult[],
+  provider: SearchProvider,
+  context: SearchContext,
+  recovered = false,
+): SearchOutcome {
+  const policy = applySourcePolicy(results, context.policy);
+  return {
+    results: rankSearchResults(policy.results).slice(0, MAX_RESULTS),
+    provider,
+    dropped: policy.dropped,
+    recovered,
+  };
+}
+
+function mergeResults(results: SearchResult[]): SearchResult[] {
+  const found = new Map<string, SearchResult>();
+  for (const item of results) upsertResult(found, item);
+  return [...found.values()];
 }
 
 async function searchWithTavily(
@@ -94,7 +319,11 @@ async function searchWithTavily(
   context: SearchContext,
 ): Promise<SearchResult[]> {
   const tavilyQuery = buildTavilyQuery(query);
-  const cacheKey = searchCacheKey(tavilyQuery, context.excludeUrls ?? []);
+  const cacheKey = searchCacheKey(
+    tavilyQuery,
+    context.excludeUrls ?? [],
+    context.policy,
+  );
   const cached = searchResultCache.get(cacheKey);
   if (cached) return cached;
 
@@ -119,6 +348,16 @@ async function searchWithTavily(
         chunks_per_source: 3,
         include_answer: false,
         include_raw_content: false,
+        exclude_domains: tavilyExcludeDomains(context.policy),
+        ...(tavilyIncludeDomains(context.policy)
+          ? { include_domains: tavilyIncludeDomains(context.policy) }
+          : {}),
+        ...(context.policy?.publishedAfter
+          ? { start_date: context.policy.publishedAfter }
+          : {}),
+        ...(context.policy?.publishedBefore
+          ? { end_date: context.policy.publishedBefore }
+          : {}),
       }),
       signal: controller.signal,
     });
@@ -127,7 +366,9 @@ async function searchWithTavily(
     }
     const data: unknown = await response.json();
     const results = parseTavilyResults(data);
-    searchResultCache.set(cacheKey, results);
+    if (results.length >= MIN_KEEP) {
+      searchResultCache.set(cacheKey, results);
+    }
     return results;
   } finally {
     clearTimeout(timer);
@@ -165,8 +406,16 @@ function buildTavilyQuery(query: string): string {
   return query.trim().slice(0, TAVILY_QUERY_LIMIT);
 }
 
-function searchCacheKey(query: string, excludeUrls: string[]): string {
-  return JSON.stringify({ q: query, skip: [...excludeUrls].sort() });
+function searchCacheKey(
+  query: string,
+  excludeUrls: string[],
+  policy?: SourcePolicy,
+): string {
+  return JSON.stringify({
+    q: query,
+    skip: [...excludeUrls].sort(),
+    policy: policy ?? null,
+  });
 }
 
 async function searchWithOpenAI(
@@ -249,6 +498,12 @@ function collectFromOutput(output: unknown[] | undefined, found: Map<string, Sea
               url: String(s.url ?? ""),
               snippet: String(s.snippet ?? s.description ?? ""),
               source: hostname(String(s.url ?? "")),
+              publishedAt:
+                typeof s.publishedAt === "string"
+                  ? s.publishedAt
+                  : typeof s.published_date === "string"
+                    ? s.published_date
+                    : undefined,
             });
           }
         }
@@ -321,7 +576,16 @@ function upsertResult(found: Map<string, SearchResult>, item: SearchResult) {
     return;
   }
   if (item.snippet && item.snippet.length > (existing.snippet?.length ?? 0)) {
-    found.set(item.url, { ...existing, ...item, source: item.source || existing.source });
+    found.set(item.url, {
+      ...existing,
+      ...item,
+      source: item.source || existing.source,
+      publishedAt: item.publishedAt || existing.publishedAt,
+    });
+    return;
+  }
+  if (item.publishedAt && !existing.publishedAt) {
+    found.set(item.url, { ...existing, publishedAt: item.publishedAt });
   }
 }
 
@@ -336,10 +600,29 @@ function hostname(url: string): string {
 function buildSearchPrompt(query: string, context: SearchContext): string {
   const lines = [
     "Search the live web for the most relevant sources for this research question.",
-    "Return a JSON object: {\"results\":[{\"title\",\"url\",\"snippet\",\"source\"}]}",
+    "Return a JSON object: {\"results\":[{\"title\",\"url\",\"snippet\",\"source\",\"publishedAt\"}]}",
+    "publishedAt is YYYY-MM-DD when known; omit it if unknown.",
     "Prefer primary sources (agencies, companies, reputable news, biographies). 8–12 results.",
+    "Skip Facebook, Instagram, TikTok, X/Twitter, Reddit, Pinterest, and URL shorteners.",
     "Do not write a narrative answer. JSON only.",
   ];
+  if (context.policy?.allowDomains.length) {
+    lines.push(
+      "Only include these domains:",
+      JSON.stringify(context.policy.allowDomains),
+    );
+  }
+  if (context.policy?.denyDomains.length) {
+    lines.push(
+      "Also skip these domains:",
+      JSON.stringify(context.policy.denyDomains),
+    );
+  }
+  if (context.policy?.publishedAfter || context.policy?.publishedBefore) {
+    lines.push(
+      `Prefer sources published between ${context.policy.publishedAfter ?? "any"} and ${context.policy.publishedBefore ?? "any"}.`,
+    );
+  }
   if (context.gaps?.length) {
     lines.push(
       "Fill these missing graph facets with NEW sources:",
@@ -367,8 +650,7 @@ function applySearchContext(
   context: SearchContext,
 ): SearchResult[] {
   const skip = new Set(context.excludeUrls ?? []);
-  const fresh = skip.size ? results.filter((result) => !skip.has(result.url)) : results;
-  return fresh.slice(0, MAX_RESULTS);
+  return skip.size ? results.filter((result) => !skip.has(result.url)) : results;
 }
 
 function rememberPageText(url: string, text: string) {
@@ -376,20 +658,35 @@ function rememberPageText(url: string, text: string) {
   if (clipped.length > MIN_PAGE_CHARS) pageTextCache.set(url, clipped);
 }
 
-export async function fetchRelevantPages(results: SearchResult[]): Promise<Document[]> {
-  const subset = results.slice(0, FETCH_COUNT);
+export async function fetchRelevantPages(results: SearchResult[]): Promise<{
+  documents: Document[];
+  failed: SearchResult[];
+}> {
+  const ranked = rankSearchResults(results);
+  const subset = ranked.slice(0, FETCH_COUNT);
+  const failed: SearchResult[] = [];
   const pages = await Promise.all(
     subset.map(async (result) => {
-      const text = await fetchPageText(result.url);
-      return { ...result, text: text ?? result.snippet };
+      const page = await fetchPage(result.url);
+      if (!page) {
+        failed.push(result);
+        return { ...result, text: result.snippet };
+      }
+      return {
+        ...result,
+        text: page.text,
+        publishedAt: result.publishedAt || page.publishedAt,
+      };
     }),
   );
-  const remainder = results.slice(FETCH_COUNT).map((r) => ({ ...r, text: r.snippet }));
-  return [...pages, ...remainder];
+  const remainder = ranked.slice(FETCH_COUNT).map((r) => ({ ...r, text: r.snippet }));
+  return { documents: [...pages, ...remainder], failed };
 }
 
-async function fetchPageText(url: string): Promise<string | null> {
-  const cached = pageTextCache.get(url);
+async function fetchPage(
+  url: string,
+): Promise<{ text: string; publishedAt?: string } | null> {
+  const cached = pageMetaCache.get(url);
   if (cached) return cached;
 
   const controller = new AbortController();
@@ -408,13 +705,41 @@ async function fetchPageText(url: string): Promise<string | null> {
     const html = await response.text();
     const text = htmlToText(html).slice(0, PAGE_CHAR_LIMIT);
     if (text.length <= MIN_PAGE_CHARS) return null;
+    const publishedAt = extractPublishedAt(html);
+    const page = { text, publishedAt };
+    pageMetaCache.set(url, page);
     pageTextCache.set(url, text);
-    return text;
+    return page;
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+function extractPublishedAt(html: string): string | undefined {
+  const patterns = [
+    /<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']article:published_time["']/i,
+    /<meta[^>]+name=["']pubdate["'][^>]+content=["']([^"']+)/i,
+    /<meta[^>]+name=["']date["'][^>]+content=["']([^"']+)/i,
+    /<time[^>]+datetime=["']([^"']+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    const normalized = normalizePublishedAt(match?.[1]);
+    if (normalized) return normalized;
+  }
+  return undefined;
+}
+
+function normalizePublishedAt(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const day = value.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  if (day) return day[1];
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return undefined;
+  return new Date(parsed).toISOString().slice(0, 10);
 }
 
 function htmlToText(html: string): string {

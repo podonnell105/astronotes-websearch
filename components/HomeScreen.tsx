@@ -3,8 +3,14 @@
 import { AccountHeader } from "@/components/AccountHeader";
 import { AppShell } from "@/components/AppShell";
 import { SearchBar } from "@/components/SearchBar";
-import { DEFAULT_QUERY } from "@/lib/templates";
-import type { AuthUser, SessionSummary } from "@/lib/types";
+import {
+  emptySourcePolicy,
+  sourcePolicyToSearchParams,
+  writeStoredSourcePolicy,
+} from "@/lib/sources";
+import type { AuthUser, SessionSummary, SourcePolicy } from "@/lib/types";
+import type { DataSourceId } from "@/lib/dataCatalog";
+import { DEFAULT_AVAILABLE_SOURCES } from "@/lib/dataCatalog";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -12,18 +18,24 @@ export function HomeScreen({
   user,
   stripeEnabled,
   graphs,
+  availableDataSources = DEFAULT_AVAILABLE_SOURCES,
 }: {
   user: AuthUser;
   stripeEnabled: boolean;
   graphs: SessionSummary[];
+  availableDataSources?: DataSourceId[];
 }) {
   const router = useRouter();
-  const [query, setQuery] = useState(DEFAULT_QUERY);
+  const [query, setQuery] = useState("");
+  const [policy, setPolicy] = useState<SourcePolicy>(emptySourcePolicy());
 
   const start = () => {
     const next = query.trim();
     if (!next) return;
-    router.push(`/r/new?q=${encodeURIComponent(next)}`);
+    writeStoredSourcePolicy(policy);
+    const params = sourcePolicyToSearchParams(policy);
+    params.set("q", next);
+    router.push(`/r/new?${params.toString()}`);
   };
 
   return (
@@ -33,13 +45,15 @@ export function HomeScreen({
           query={query}
           onQuery={setQuery}
           onSubmit={start}
-          showTemplates
+          policy={policy}
+          onPolicy={setPolicy}
+          availableDataSources={availableDataSources}
         />
         <div className="mx-auto mt-16 w-full max-w-2xl">
           <div className="label mb-3">Saved graphs</div>
           {graphs.length === 0 ? (
             <p className="text-[13px] text-dim">
-              No research yet. Start with a landscape, counterparty, or claim-audit query.
+              No research yet. Ask a question to start a graph.
             </p>
           ) : (
             <ul className="divide-y divide-line border border-line">

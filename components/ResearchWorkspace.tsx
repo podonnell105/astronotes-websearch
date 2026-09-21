@@ -12,10 +12,16 @@ import { SearchBar } from "@/components/SearchBar";
 import { buildPackCsv, buildPackMarkdown } from "@/lib/pack";
 import { formatAsOf } from "@/lib/claims";
 import { hasResearchIntent } from "@/lib/researchIntent";
-import { DEFAULT_QUERY } from "@/lib/templates";
+import {
+  emptySourcePolicy,
+  formatSourcePolicy,
+  readStoredSourcePolicy,
+  sourcePolicyActive,
+} from "@/lib/sources";
 import type {
   AuthUser,
   ChatTurn,
+  DroppedSource,
   Entity,
   EvidenceRecord,
   GraphQueryResponse,
@@ -24,8 +30,11 @@ import type {
   RuntimeMode,
   SearchResult,
   SessionView,
+  SourcePolicy,
   Validation,
 } from "@/lib/types";
+import type { DataSourceId } from "@/lib/dataCatalog";
+import { DEFAULT_AVAILABLE_SOURCES } from "@/lib/dataCatalog";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -51,6 +60,8 @@ function applyView(session: SessionView) {
     validations: session.validations,
     evidence: session.evidence,
     sources: session.sources,
+    sourcePolicy: session.sourcePolicy ?? emptySourcePolicy(),
+    droppedSources: session.droppedSources ?? [],
     logs: session.logs,
     stats: session.stats,
     chat: session.chat,
@@ -63,19 +74,23 @@ export function ResearchWorkspace({
   stripeEnabled = false,
   initialSession = null,
   initialQuery,
+  initialPolicy,
   autoStart = false,
   readOnly = false,
+  availableDataSources = DEFAULT_AVAILABLE_SOURCES,
 }: {
   user?: AuthUser | null;
   stripeEnabled?: boolean;
   initialSession?: SessionView | null;
   initialQuery?: string;
+  initialPolicy?: SourcePolicy;
   autoStart?: boolean;
   readOnly?: boolean;
+  availableDataSources?: DataSourceId[];
 }) {
   const router = useRouter();
   const seeded = initialSession ? applyView(initialSession) : null;
-  const [query, setQuery] = useState(seeded?.query ?? initialQuery ?? DEFAULT_QUERY);
+  const [query, setQuery] = useState(seeded?.query ?? initialQuery ?? "");
   const [started, setStarted] = useState(Boolean(seeded));
   const [status, setStatus] = useState<Status>(seeded?.status ?? "idle");
   const [mode, setMode] = useState<RuntimeMode | null>(seeded?.mode ?? null);
@@ -120,14 +135,25 @@ export function ResearchWorkspace({
   );
   const [credits, setCredits] = useState(user?.credits ?? 0);
   const [shareNotice, setShareNotice] = useState<string | null>(null);
+  const [sourcePolicy, setSourcePolicy] = useState<SourcePolicy>(
+    seeded?.sourcePolicy ?? initialPolicy ?? emptySourcePolicy(),
+  );
+  const [droppedSources, setDroppedSources] = useState<DroppedSource[]>(
+    seeded?.droppedSources ?? [],
+  );
   const runStartedAtRef = useRef<number | null>(null);
   const sessionIdRef = useRef<string | null>(sessionId);
   const autoStarted = useRef(false);
+  const policyRef = useRef(sourcePolicy);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
+
+  useEffect(() => {
+    policyRef.current = sourcePolicy;
+  }, [sourcePolicy]);
 
   const resetGraph = () => {
     setEntities([]);
@@ -135,6 +161,7 @@ export function ResearchWorkspace({
     setValidations({});
     setEvidence({});
     setSources([]);
+    setDroppedSources([]);
     setLogs([]);
     setStats({ sources: 0, entities: 0, relationships: 0, validations: 0 });
     setSelectedRelationshipId(null);
@@ -227,6 +254,10 @@ export function ResearchWorkspace({
           [event.record.relationshipId]: event.record,
         }));
         break;
+      case "dropped_sources":
+        setSourcePolicy(event.policy);
+        setDroppedSources(event.dropped);
+        break;
       case "stats":
         setStats({
           sources: event.sources,
@@ -295,6 +326,7 @@ export function ResearchWorkspace({
           query: nextQuery,
           ...(extending && sessionId ? { sessionId } : {}),
           ...(options?.preferExistingLinks ? { preferExistingLinks: true } : {}),
+          sourcePolicy: policyRef.current,
         }),
       });
       if (!response.ok || !response.body) {
@@ -333,6 +365,12 @@ export function ResearchWorkspace({
     if (!autoStart || initialSession) return;
     const next = (initialQuery ?? query).trim();
     if (!next) return;
+    const stored = readStoredSourcePolicy();
+    if (stored) {
+      const merged = mergePolicies(stored, initialPolicy ?? emptySourcePolicy());
+      setSourcePolicy(merged);
+      policyRef.current = merged;
+    }
     const timer = window.setTimeout(() => {
       if (autoStarted.current) return;
       autoStarted.current = true;
@@ -442,6 +480,7 @@ export function ResearchWorkspace({
           role: "assistant",
           text: payload.answer,
           model: payload.model,
+          references: payload.references ?? [],
           edgeReferences: payload.edgeReferences ?? [],
         },
       ]);
@@ -449,7 +488,10 @@ export function ResearchWorkspace({
         (payload.edgeReferences ?? []).map((r) => r.relationshipId),
       );
       setSelectedRelationshipId(null);
-      setFocusedEntityIds(selectedEntityId ? [selectedEntityId] : []);
+      const cited = (payload.references ?? []).map((r) => r.entityId);
+      setFocusedEntityIds(
+        cited.length ? cited : selectedEntityId ? [selectedEntityId] : [],
+      );
     } catch (err) {
       setQueryError(err instanceof Error ? err.message : "Query failed");
     } finally {
@@ -471,6 +513,8 @@ export function ResearchWorkspace({
         validations,
         evidence,
         sources,
+        sourcePolicy,
+        droppedSources,
         logs,
         chat: chatMessages,
         status: status === "idle" ? "complete" : status,
@@ -538,9 +582,16 @@ export function ResearchWorkspace({
       trailing={
         <>
           {started && asOfStamp != null && (
-            <span className="hidden font-mono text-[10px] uppercase tracking-[0.12em] text-dim lg:inline">
+            <button
+              type="button"
+              onClick={() => setView("claims")}
+              className="hidden max-w-sm truncate text-left font-mono text-[10px] uppercase tracking-[0.12em] text-dim hover:text-ink lg:inline"
+              title={formatSourcePolicy(sourcePolicy)}
+            >
               As of {formatAsOf({ frozenAt: asOfStamp, createdAt: asOfStamp })}
-            </span>
+              {droppedSources.length > 0 ? ` · Dropped ${droppedSources.length}` : ""}
+              {sourcePolicyActive(sourcePolicy) ? " · Sources" : ""}
+            </button>
           )}
           <ModeBadge mode={mode} jevStatus={jevStatus} />
           <ResearchStatus status={status} elapsedMs={elapsedMs} />
@@ -557,7 +608,9 @@ export function ResearchWorkspace({
             onQuery={setQuery}
             onSubmit={runResearch}
             disabled={status === "running"}
-            showTemplates
+            policy={sourcePolicy}
+            onPolicy={setSourcePolicy}
+            availableDataSources={availableDataSources}
           />
         </div>
       ) : (
@@ -571,6 +624,9 @@ export function ResearchWorkspace({
                 disabled={status === "running"}
                 compact
                 onNewGraph={startNewGraph}
+                policy={sourcePolicy}
+                onPolicy={setSourcePolicy}
+                availableDataSources={availableDataSources}
               />
               {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
             </div>
@@ -579,6 +635,10 @@ export function ResearchWorkspace({
             <div className="shrink-0 border-b border-line px-4 py-3">
               <div className="label">Shared evidence pack</div>
               <p className="mt-1 text-[13px] text-ink">{query}</p>
+              <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+                {formatSourcePolicy(sourcePolicy)}
+                {droppedSources.length > 0 ? ` · Dropped ${droppedSources.length}` : ""}
+              </p>
             </div>
           )}
           <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2">
@@ -727,9 +787,11 @@ export function ResearchWorkspace({
                   messages={chatMessages}
                   loading={queryLoading}
                   error={queryError}
+                  entities={entities}
                   selectedEntityId={selectedEntityId}
                   selectedRelationshipId={selectedRelationshipId}
                   onSelectEdge={(id) => selectRelationship(id)}
+                  onSelectEntity={selectEntity}
                 />
               </div>
             )}
@@ -739,6 +801,18 @@ export function ResearchWorkspace({
       )}
     </AppShell>
   );
+}
+
+function mergePolicies(primary: SourcePolicy, fallback: SourcePolicy): SourcePolicy {
+  return {
+    allowDomains: primary.allowDomains.length ? primary.allowDomains : fallback.allowDomains,
+    denyDomains: [...new Set([...fallback.denyDomains, ...primary.denyDomains])],
+    publishedAfter: primary.publishedAfter || fallback.publishedAfter,
+    publishedBefore: primary.publishedBefore || fallback.publishedBefore,
+    onlyUrls: primary.onlyUrls.length ? primary.onlyUrls : fallback.onlyUrls,
+    role: primary.role || fallback.role,
+    dataSources: primary.dataSources.length ? primary.dataSources : fallback.dataSources,
+  };
 }
 
 async function readSSE(

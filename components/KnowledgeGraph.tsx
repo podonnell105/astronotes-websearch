@@ -1,6 +1,6 @@
 "use client";
 
-import { layoutGraph } from "@/lib/layout";
+import { edgeLanes, layoutGraph } from "@/lib/layout";
 import {
   entityTypeChip,
   type Entity,
@@ -54,13 +54,27 @@ function EntityNode({ data, selected }: NodeProps<Node<EntityData>>) {
 }
 
 function GraphEdge(props: EdgeProps) {
+  const sourceShift = Number(props.data?.sourceShift ?? 0);
+  const targetShift = Number(props.data?.targetShift ?? 0);
+  const step = clamp(Number(props.data?.stepPosition ?? 0.5), 0.18, 0.82);
+  const sourceX = props.sourceX + sourceShift;
+  const targetX = props.targetX + targetShift;
+  const sourceGappedY =
+    props.sourceY + (props.sourcePosition === Position.Bottom ? 20 : props.sourcePosition === Position.Top ? -20 : 0);
+  const targetGappedY =
+    props.targetY + (props.targetPosition === Position.Top ? -20 : props.targetPosition === Position.Bottom ? 20 : 0);
   const [edgePath, labelX, labelY] = getSmoothStepPath({
-    sourceX: props.sourceX,
+    sourceX,
     sourceY: props.sourceY,
-    targetX: props.targetX,
+    targetX,
     targetY: props.targetY,
     sourcePosition: props.sourcePosition,
     targetPosition: props.targetPosition,
+    offset: 20,
+    borderRadius: 5,
+    stepPosition: step,
+    centerX: sourceX + (targetX - sourceX) * 0.5,
+    centerY: sourceGappedY + (targetGappedY - sourceGappedY) * step,
   });
   const decision = String(props.data?.decision ?? "PENDING");
   const focused = Boolean(props.data?.focused);
@@ -104,6 +118,10 @@ function GraphEdge(props: EdgeProps) {
 
 const nodeTypes = { entity: EntityNode };
 const edgeTypes = { audit: GraphEdge };
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
 function edgeStyle(
   validation?: Validation,
@@ -204,8 +222,15 @@ function GraphInner({
       type: "audit",
       label: rel.type,
     }));
-    setNodes(layoutGraph(rawNodes, rawEdges, "TB") as Node<EntityData>[]);
-    setEdges(rawEdges);
+    const placed = layoutGraph(rawNodes, rawEdges, "TB") as Node<EntityData>[];
+    const lanes = edgeLanes(placed, rawEdges);
+    setNodes(placed);
+    setEdges(
+      rawEdges.map((edge) => ({
+        ...edge,
+        data: lanes.get(edge.id) ?? { sourceShift: 0, targetShift: 0, stepPosition: 0.5 },
+      })),
+    );
     const t = window.setTimeout(() => fitView({ padding: 0.24, duration: 320 }), 50);
     return () => window.clearTimeout(t);
   }, [structureKey, entities, relationships, setNodes, setEdges, fitView]);
@@ -246,6 +271,9 @@ function GraphInner({
           data: {
             decision: validation?.decision ?? "PENDING",
             focused,
+            sourceShift: Number(edge.data?.sourceShift ?? 0),
+            targetShift: Number(edge.data?.targetShift ?? 0),
+            stepPosition: Number(edge.data?.stepPosition ?? 0.5),
           },
           style,
           selected,

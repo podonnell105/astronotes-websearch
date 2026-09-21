@@ -374,6 +374,25 @@ html.light .pixel-compose-motif {
   color: var(--dim);
 }
 
+.chat-entity-link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.chat-entity-link:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}
+
+.chat-entity-link--active {
+  color: var(--accent);
+  background: var(--accent-ring);
+  text-decoration-color: var(--accent);
+}
+
 .chat-edge-chip {
   display: flex;
   flex-direction: column;
@@ -475,6 +494,32 @@ html.light .pixel-compose-motif {
 }
 
 .claim-decision--PENDING {
+  color: var(--dim);
+}
+
+.claim-status {
+  display: inline-block;
+  border: 1px solid var(--line);
+  padding: 1px 6px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.claim-status--deployed {
+  border-color: var(--supported);
+  color: var(--supported);
+}
+
+.claim-status--announced {
+  border-color: var(--uncertain);
+  color: var(--uncertain);
+}
+
+.claim-status--unclear {
   color: var(--dim);
 }
 

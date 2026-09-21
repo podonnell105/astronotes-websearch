@@ -1,25 +1,37 @@
 import { detectRuntime, nowStamp } from "./config";
 import { DEMO_QUERY, DEMO_VALIDATIONS, sourcesForRelationship } from "./demo";
-import { addEvidence, sourcesForUrls } from "./evidence";
+import { addEvidence, sourcesForClaim } from "./evidence";
 import { remapId, resolveEntities } from "./entities";
 import {
   attachNewEntities,
   evidenceExcerpt,
   extractKnowledge,
   groundRelationships,
+  recitesBetterEvidence,
+  type Extraction,
 } from "./extraction";
 import { addEntity, addRelationship } from "./graph";
 import { classifyClaims, toValidation } from "./jev";
-import { fetchRelevantPages, rankKnownEntities, searchWeb } from "./search";
+import { fetchPrimaryRecords, harvestOrgNames } from "./primarySources";
+import {
+  fetchRelevantPages,
+  nameOnlySearchQuery,
+  rankKnownEntities,
+  searchWeb,
+  strategicSearchQuery,
+  type Document,
+} from "./search";
+import { emptySourcePolicy, hostIsDenied, mergeDropped, normalizeSourcePolicy, summarizeDropped } from "./sources";
 import { buildNeighborhood, planResearch } from "./researchPlan";
 import {
   createSession,
   getSession,
+  persistSession,
   rememberEvent,
   resumeSession,
   type SessionRecord,
 } from "./store";
-import type { Emit, Entity, Relationship } from "./types";
+import type { DroppedSource, Emit, Entity, Relationship, SearchResult, SourcePolicy } from "./types";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -47,13 +59,26 @@ export async function runResearch(
   query: string,
   emit: Emit,
   sessionId?: string,
-  options?: { preferExistingLinks?: boolean; userId?: string },
+  options?: { preferExistingLinks?: boolean; userId?: string; sourcePolicy?: SourcePolicy },
 ): Promise<SessionRecord> {
   const runtime = detectRuntime();
   const nextQuery = query.trim() || DEMO_QUERY;
+  const incomingPolicy = options?.sourcePolicy
+    ? normalizeSourcePolicy(options.sourcePolicy)
+    : undefined;
   const session = sessionId
     ? resumeOrThrow(sessionId, nextQuery)
-    : createSession(requiredUserId(options?.userId), nextQuery, runtime.mode);
+    : createSession(
+        requiredUserId(options?.userId),
+        nextQuery,
+        runtime.mode,
+        incomingPolicy ?? emptySourcePolicy(),
+      );
+  if (incomingPolicy) {
+    session.sourcePolicy = incomingPolicy;
+    persistSession(session);
+  }
+  const policy = session.sourcePolicy;
   const extending = Boolean(sessionId);
   const preferExistingLinks = Boolean(options?.preferExistingLinks && extending);
   const stagger = runtime.mode === "demo" ? 140 : 0;
@@ -74,7 +99,6 @@ export async function runResearch(
   try {
     const existingEntities = [...session.entities.values()];
     const existingRelationships = [...session.relationships.values()];
-    const excludeUrls = session.sources.map((source) => source.url);
     const knownEntities = rankKnownEntities(
       nextQuery,
       existingEntities.map((entity) => ({
@@ -100,7 +124,8 @@ export async function runResearch(
       gaps = plan.gaps;
       log(emit, session, `Searching for: ${searchQuery}`);
     } else {
-      log(emit, session, "Searching the web...");
+      searchQuery = strategicSearchQuery(nextQuery);
+      log(emit, session, `Searching for: ${searchQuery}`);
     }
 
     if (runtime.search === "mock") {
@@ -117,71 +142,149 @@ export async function runResearch(
       log(emit, session, "Searching with OpenAI...");
     }
 
-    const { results, provider } = await searchWeb(searchQuery, {
-      knownEntities: extending ? knownEntities.slice(0, 3) : undefined,
-      excludeUrls,
-      gaps: gaps.length ? gaps : undefined,
-    });
-    if (runtime.search === "tavily" && provider === "openai") {
+    const runSearch = (q: string, broaden = false) =>
+      searchWeb(q, {
+        knownEntities: extending ? knownEntities.slice(0, 3) : undefined,
+        excludeUrls: session.sources.map((source) => source.url),
+        gaps: gaps.length ? gaps : undefined,
+        broaden,
+        policy,
+      });
+
+    let { results, provider, dropped, recovered } = await runSearch(searchQuery);
+    recordDropped(session, emit, dropped);
+    if (results.length === 0 && !extending && !policy.onlyUrls.length) {
+      log(emit, session, "No sources — broadening search");
+      ({ results, provider, dropped, recovered } = await runSearch(
+        nameOnlySearchQuery(nextQuery),
+        true,
+      ));
+      recordDropped(session, emit, dropped);
+    }
+    if (recovered) {
+      log(emit, session, "Few sources — merged OpenAI web search");
+    } else if (runtime.search === "tavily" && provider === "openai") {
       log(emit, session, "Tavily unavailable — using OpenAI web search");
     }
 
-    if (results.length === 0) {
+    // Structured lookup runs beside page fetches so catalog time is hidden.
+    let primaryDocs: Document[] = [];
+    const wantPrimary =
+      runtime.search !== "mock" &&
+      !policy.onlyUrls.length &&
+      policy.dataSources.length > 0;
+    const hintNames = harvestOrgNames(results);
+    const primaryPromise = wantPrimary
+      ? fetchPrimaryRecords({
+          query: nextQuery,
+          knownEntities,
+          hintNames,
+          excludeUrls: [
+            ...session.sources.map((source) => source.url),
+            ...results.map((result) => result.url),
+          ],
+          policy,
+        })
+      : Promise.resolve({ documents: [] as Document[], dropped: [], skipped: [] as string[] });
+
+    if (wantPrimary) log(emit, session, "Looking up structured records...");
+
+    if (results.length === 0 && !wantPrimary) {
       log(emit, session, "No new sources to add");
       stats(emit, session);
       return complete(session, emit);
     }
 
-    for (const result of results) {
-      if (session.sources.some((source) => source.url === result.url)) continue;
-      session.sources.push(result);
-      const event = { type: "source" as const, result };
-      rememberEvent(session, event);
-      emit(event);
-      log(emit, session, `Found ${result.source || result.title}`);
-      stats(emit, session);
-      if (stagger) await sleep(stagger);
-    }
-
-    log(emit, session, `Found ${results.length} sources`);
     log(emit, session, "Reading relevant pages...");
-    const documents =
-      runtime.search === "mock"
-        ? results.map((result) => ({ ...result, text: result.snippet }))
-        : await fetchRelevantPages(results);
-
-    log(emit, session, "Extracting entities and claims...");
-    let extracted = await extractKnowledge(nextQuery, documents, {
-      existingEntities,
-      existingRelationships: existingRelationships.map((rel) => ({
-        source: rel.source,
-        type: rel.type,
-        target: rel.target,
-      })),
-      preferExistingLinks: extending && !allowNewEntities,
-      allowNewEntities: extending ? allowNewEntities : undefined,
-      gaps,
-    });
-    if (runtime.search !== "mock") {
-      const before = extracted.relationships.length;
-      extracted.relationships = groundRelationships(
-        extracted.relationships,
-        documents,
-      );
-      if (extracted.relationships.length < before) {
+    let documents: Document[] = [];
+    if (runtime.search === "mock") {
+      documents = results.map((result) => ({ ...result, text: result.snippet }));
+      await addSources(session, emit, documents, stagger);
+    } else {
+      const [primary, fetched] = await Promise.all([
+        primaryPromise,
+        results.length > 0
+          ? fetchRelevantPages(results)
+          : Promise.resolve({ documents: [] as Document[], failed: [] }),
+      ]);
+      recordDropped(session, emit, primary.dropped);
+      for (const message of primary.skipped) log(emit, session, message);
+      primaryDocs = primary.documents;
+      if (primaryDocs.length > 0) {
+        const hosts = [...new Set(primaryDocs.map((doc) => doc.source).filter(Boolean))];
         log(
           emit,
           session,
-          `Dropped ${before - extracted.relationships.length} ungrounded claims`,
+          `Attached ${primaryDocs.length} primary records (${hosts.join(" / ") || "catalog"})`,
         );
       }
+      recordFailedFetches(session, emit, fetched.failed);
+      const webDocs = usableDocuments(fetched.documents, fetched.failed);
+      await addSources(session, emit, primaryDocs, stagger);
+      await addSources(session, emit, webDocs, stagger);
+      documents = [...primaryDocs, ...webDocs];
     }
+
+    if (results.length === 0 && primaryDocs.length === 0) {
+      log(emit, session, "No new sources to add");
+      stats(emit, session);
+      return complete(session, emit);
+    }
+
+    log(emit, session, `Found ${session.sources.length} sources`);
+
+    log(emit, session, "Extracting entities and claims...");
+    let extracted = await extractFromDocuments(
+      nextQuery,
+      documents,
+      existingEntities,
+      existingRelationships,
+      {
+        preferExistingLinks: extending && !allowNewEntities,
+        allowNewEntities: extending ? allowNewEntities : undefined,
+        gaps,
+      },
+      runtime.search !== "mock" ? (message) => log(emit, session, message) : undefined,
+    );
     if (extending && existingEntities.length > 0) {
       extracted = attachNewEntities(
         extracted,
         rankExisting(nextQuery, existingEntities),
         documents,
       );
+    }
+
+    if (
+      !extending &&
+      extracted.relationships.length === 0 &&
+      runtime.search !== "mock"
+    ) {
+      log(emit, session, "No claims from first sources — broadening search");
+      const more = await runSearch(nameOnlySearchQuery(nextQuery), true);
+      recordDropped(session, emit, more.dropped);
+      if (more.recovered) {
+        log(emit, session, "Few sources — merged OpenAI web search");
+      }
+      if (more.results.length > 0) {
+        const extra = await fetchRelevantPages(more.results);
+        recordFailedFetches(session, emit, extra.failed);
+        const extraDocs = usableDocuments(extra.documents, extra.failed);
+        await addSources(session, emit, extraDocs, stagger);
+        log(emit, session, `Found ${extraDocs.length} sources`);
+        documents = [...documents, ...extraDocs];
+        extracted = await extractFromDocuments(
+          nextQuery,
+          documents,
+          existingEntities,
+          existingRelationships,
+          {
+            preferExistingLinks: false,
+            allowNewEntities: true,
+            gaps,
+          },
+          (message) => log(emit, session, message),
+        );
+      }
     }
     log(emit, session, `Extracted ${extracted.entities.length} candidate entities`);
 
@@ -268,6 +371,7 @@ export async function runResearch(
             claim: rel.claim,
             evidence: excerpts.get(rel.id) || rel.claim,
             sourceUrl: rel.sourceUrl,
+            status: rel.status,
           })),
         ),
       ),
@@ -317,7 +421,7 @@ export async function runResearch(
         const sources =
           runtime.mode === "demo"
             ? sourcesForRelationship(rel)
-            : sourcesForUrls([rel.sourceUrl], session.sources);
+            : sourcesForClaim(rel, from, to, session.sources, documents);
 
         const record = {
           relationshipId: rel.id,
@@ -366,6 +470,126 @@ function complete(session: SessionRecord, emit: Emit): SessionRecord {
   rememberEvent(session, event);
   emit(event);
   return session;
+}
+
+function recordDropped(
+  session: SessionRecord,
+  emit: Emit,
+  dropped: DroppedSource[],
+) {
+  if (dropped.length === 0) return;
+  session.droppedSources = mergeDropped(session.droppedSources, dropped);
+  persistSession(session);
+  const message = summarizeDropped(dropped);
+  if (message) log(emit, session, message);
+  const event = {
+    type: "dropped_sources" as const,
+    policy: session.sourcePolicy,
+    dropped: session.droppedSources,
+  };
+  rememberEvent(session, event);
+  emit(event);
+}
+
+function recordFailedFetches(
+  session: SessionRecord,
+  emit: Emit,
+  failed: SearchResult[],
+) {
+  const empty = failed.filter((item) => !item.snippet?.trim());
+  if (empty.length === 0) return;
+  recordDropped(
+    session,
+    emit,
+    empty.map((item) => ({
+      url: item.url,
+      title: item.title,
+      reason: "failed_fetch" as const,
+    })),
+  );
+}
+
+function usableDocuments(documents: Document[], failed: SearchResult[]): Document[] {
+  const empty = new Set(
+    failed.filter((item) => !item.snippet?.trim()).map((item) => item.url),
+  );
+  return documents.filter((doc) => !empty.has(doc.url));
+}
+
+async function addSources(
+  session: SessionRecord,
+  emit: Emit,
+  results: Array<SearchResult & { text?: string }>,
+  stagger: number,
+) {
+  for (const result of results) {
+    const stored: SearchResult = {
+      title: result.title,
+      url: result.url,
+      snippet: result.snippet,
+      source: result.source,
+      publishedAt: result.publishedAt,
+    };
+    if (hostIsDenied(stored.url, session.sourcePolicy.denyDomains)) continue;
+    const existing = session.sources.find((source) => source.url === stored.url);
+    if (existing) {
+      if (!existing.publishedAt && stored.publishedAt) existing.publishedAt = stored.publishedAt;
+      continue;
+    }
+    session.sources.push(stored);
+    const event = { type: "source" as const, result: stored };
+    rememberEvent(session, event);
+    emit(event);
+    log(emit, session, `Found ${result.source || result.title}`);
+    stats(emit, session);
+    if (stagger) await sleep(stagger);
+  }
+}
+
+async function extractFromDocuments(
+  query: string,
+  documents: Document[],
+  existingEntities: Entity[],
+  existingRelationships: Relationship[],
+  context: {
+    preferExistingLinks?: boolean;
+    allowNewEntities?: boolean;
+    gaps?: string[];
+  },
+  onGroundedDrop?: (message: string) => void,
+): Promise<Extraction> {
+  const extracted = await extractKnowledge(query, documents, {
+    existingEntities,
+    existingRelationships: existingRelationships.map((rel) => ({
+      source: rel.source,
+      type: rel.type,
+      target: rel.target,
+    })),
+    preferExistingLinks: context.preferExistingLinks,
+    allowNewEntities: context.allowNewEntities,
+    gaps: context.gaps,
+  });
+  if (!onGroundedDrop) {
+    extracted.relationships = recitesBetterEvidence(
+      extracted.relationships,
+      [...existingEntities, ...extracted.entities],
+      documents,
+    );
+    return extracted;
+  }
+  const before = extracted.relationships.length;
+  extracted.relationships = groundRelationships(extracted.relationships, documents);
+  if (extracted.relationships.length < before) {
+    onGroundedDrop(
+      `Dropped ${before - extracted.relationships.length} ungrounded claims`,
+    );
+  }
+  extracted.relationships = recitesBetterEvidence(
+    extracted.relationships,
+    [...existingEntities, ...extracted.entities],
+    documents,
+  );
+  return extracted;
 }
 
 function rankExisting(query: string, entities: Entity[]): Entity[] {

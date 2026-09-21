@@ -2,8 +2,9 @@ import { hasOpenAI } from "./config";
 import { DEMO_ENTITIES, DEMO_RELATIONSHIPS } from "./demo";
 import { EXTRACT_MODELS } from "./models";
 import type { Document } from "./search";
-import type { Entity, Relationship } from "./types";
-import { normalizeEntityType } from "./types";
+import { IDENTITY_REL_TYPES, isChromeText, rankSearchResults, sourceTrust } from "./sourceQuality";
+import type { Entity, Relationship, RelationshipStatus } from "./types";
+import { normalizeEntityType, normalizeRelationshipStatus } from "./types";
 
 export type Extraction = {
   entities: Entity[];
@@ -20,20 +21,31 @@ Return JSON:
     "target": "slug",
     "type": "partners_with",
     "claim": "one sentence claim",
+    "status": "announced",
     "sourceUrl": "https://...",
     "evidenceSnippet": "short supporting passage from the documents"
   }]
 }
 
 Entity types: exactly one lowercase noun. Prefer: person, organization, company, technology, mission, location, product, spacecraft, concept, service, event, process. If none fit, still use a single noun (law, fund, school, cycle). Never use phrases or blanks.
-Relationship types: concise verbs such as partners_with, develops, owns, operates, funds, acquired, supplies, works_with, launches, uses, member_of, represents, educated_at, minister_of, born_in, provides, explains.
+Relationship types: concise verbs such as partners_with, develops, owns, operates, funds, acquired, supplies, works_with, launches, uses, member_of, represents, educated_at, minister_of, born_in, provides, explains, announced_for, contracts.
+Every relationship MUST include status: exactly one of deployed, announced, unclear.
+- announced = press release, selection, award, "will build", or deploy-intent without evidence of operations
+- deployed = operating, launched, contracted delivery already in service, on-orbit, or on-surface, or a USASpending award record with amount and dates. Also use deployed for identity that already happened: cofounded, served as CEO, is a partner, graduated, chairs.
+- unclear = documents do not establish either
+Align verbs with status: announced_for / selected_for for announcements; operates / contracts for in-service work; founded / partner_at / educated_at for identity.
+SEC EDGAR filings (8-K, 10-K, Form D, Form 4), USASpending awards, SAM.gov solicitations, USPTO patents, NIH grants, ClinicalTrials.gov records, GitHub repos, GLEIF LEIs, OpenSanctions flags, and Wayback captures are primary records. Prefer them over press when labeling deployed vs announced. A press "selected by" without an award, filing, trial, or shipped repo remains announced.
 
 Rules:
 - ids are lowercase kebab-case slugs
 - relationship source/target must match an entity id from this response or from existingEntities
 - only extract claims grounded in the documents
-- prefer 8–20 high-value relationships, not an exhaustive dump
-- evidenceSnippet must be a short quote or close paraphrase of the source
+- prefer 8–12 strategic relationships: founding roles, operating roles, funds they run, and signature investments with a named round or date. Skip laundry-list portfolio names from one "including X and Y" sentence
+- sourceUrl must be the most independent document in this payload that states the fact. Prefer wikipedia.org, britannica.com, .gov, and major news over the subject's own website, YouTube, retailers, and Goodreads
+- evidenceSnippet must be a short quote copied from that same document's text, not a page title or nav chrome
+- do not extract fictional characters, TV plot, or satire as real-world involvement unless the query is about that work
+- do not only emit high-confidence PR facts; include announcement-only claims and conflict or absence claims when the documents support them
+- if the same pair has both an announcement and a weaker operational claim, extract both with distinct types and matching status
 - if existingEntities is present, reuse those canonical ids; do not invent a second id for a known entity
 - extract NEW entities and NEW relationships, including edges that attach to existing entities
 - do not re-emit known source/type/target triples from existingRelationships
@@ -87,7 +99,7 @@ export async function extractKnowledge(
   const payload = {
     query,
     gaps: context.gaps ?? [],
-    documents: documents.map((doc) => ({
+    documents: rankSearchResults(documents).map((doc) => ({
       title: doc.title,
       url: doc.url,
       source: doc.source,
@@ -191,6 +203,7 @@ function normalizeExtraction(raw: unknown, existing: Entity[] = []): Extraction 
         target,
         type,
         claim: String(r.claim ?? `${source} ${type} ${target}`),
+        status: identityStatus(type, normalizeRelationshipStatus(r.status)),
         sourceUrl: typeof r.sourceUrl === "string" ? r.sourceUrl : undefined,
         evidenceSnippet:
           typeof r.evidenceSnippet === "string" ? r.evidenceSnippet : undefined,
@@ -252,6 +265,7 @@ export function attachNewEntities(
       target: anchor.id,
       type,
       claim: `${entity.name} is related to ${anchor.name}`,
+      status: "unclear",
       sourceUrl: doc?.url,
       evidenceSnippet: doc
         ? (doc.snippet || (doc.text ?? "").slice(0, 240) || undefined)
@@ -303,6 +317,72 @@ function mentionsName(doc: Document, name: string): boolean {
   return hay.includes(name.trim().toLowerCase());
 }
 
+export function recitesBetterEvidence(
+  relationships: Relationship[],
+  entities: Entity[],
+  documents: Document[],
+): Relationship[] {
+  if (documents.length === 0) return relationships;
+  const names = new Map(entities.map((entity) => [entity.id, entity.name]));
+  return relationships.map((rel) => {
+    const sourceName = names.get(rel.source) ?? rel.source;
+    const targetName = names.get(rel.target) ?? rel.target;
+    const current = rel.sourceUrl ? sourceTrust(rel.sourceUrl) : -1;
+    let best = rel;
+    let bestScore = current;
+
+    for (const doc of documents) {
+      const trust = sourceTrust(doc.url);
+      if (trust <= bestScore) continue;
+      const hay = `${doc.text ?? ""} ${doc.snippet ?? ""}`;
+      if (!mentionsName(doc, sourceName) || !mentionsName(doc, targetName)) continue;
+      const snippet = quoteAround(hay, sourceName, targetName, rel.evidenceSnippet);
+      if (!snippet || !isGroundedSnippet(snippet, hay)) continue;
+      bestScore = trust;
+      best = { ...rel, sourceUrl: doc.url, evidenceSnippet: snippet };
+    }
+    return best;
+  });
+}
+
+function quoteAround(
+  haystack: string,
+  sourceName: string,
+  targetName: string,
+  prior?: string,
+): string | null {
+  const hay = haystack.replace(/\s+/g, " ").trim();
+  if (!hay) return null;
+  if (prior && isGroundedSnippet(prior, hay) && !isChromeText(prior)) {
+    const index = findSnippetIndex(hay, prior);
+    if (index >= 0) {
+      const window = hay.slice(Math.max(0, index - 24), index + Math.min(prior.length + 160, 280));
+      if (!isChromeText(window)) return window.trim();
+    }
+  }
+
+  const lower = hay.toLowerCase();
+  const source = sourceName.trim().toLowerCase();
+  const target = targetName.trim().toLowerCase();
+  let from = 0;
+  for (let i = 0; i < 6; i += 1) {
+    const s = lower.indexOf(source, from);
+    const t = lower.indexOf(target, from);
+    if (s < 0 || t < 0) break;
+    const start = Math.max(0, Math.min(s, t) - 36);
+    const end = Math.min(hay.length, Math.max(s + source.length, t + target.length) + 140);
+    const slice = hay.slice(start, end).trim();
+    if (slice.length >= 24 && !isChromeText(slice)) return slice.slice(0, 280);
+    from = Math.min(s, t) + 1;
+  }
+  return null;
+}
+
+function identityStatus(type: string, status: RelationshipStatus): RelationshipStatus {
+  if (status !== "unclear") return status;
+  return IDENTITY_REL_TYPES.has(type) ? "deployed" : status;
+}
+
 export function groundRelationships(
   relationships: Relationship[],
   documents: Document[],
@@ -337,18 +417,25 @@ export function evidenceExcerpt(
   documents: Document[],
 ): string {
   const doc = documents.find((item) => item.url === rel.sourceUrl);
-  const text = (doc?.text || doc?.snippet || "").trim();
+  const text = (doc?.text || doc?.snippet || "").replace(/\s+/g, " ").trim();
   const snippet = (rel.evidenceSnippet ?? "").trim();
 
   if (text && snippet) {
     const index = findSnippetIndex(text, snippet);
     if (index >= 0) {
-      const extra = Math.max(0, EVIDENCE_CAP - snippet.length);
-      const start = Math.max(0, index - Math.floor(extra / 2));
-      return text.slice(start, start + EVIDENCE_CAP).trim();
+      const start = Math.max(0, index - 80);
+      const window = text.slice(start, start + Math.min(EVIDENCE_CAP, 420)).trim();
+      if (!isChromeText(window)) return window;
     }
   }
-  if (text) return text.slice(0, EVIDENCE_CAP).trim();
+  if (snippet && !isChromeText(snippet)) return snippet.slice(0, EVIDENCE_CAP);
+  if (text) {
+    const cleaned = text
+      .replace(/skip to (main )?content[\s\S]{0,80}/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return cleaned.slice(0, EVIDENCE_CAP);
+  }
   return snippet || rel.claim;
 }
 

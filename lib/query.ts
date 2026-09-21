@@ -1,6 +1,7 @@
 import { hasOpenAI } from "./config";
 import { compactGraph } from "./graph";
 import { QUERY_MODELS } from "./models";
+import { annotateEntityMentions } from "./entityLinks";
 import { getSession } from "./store";
 import type { GraphEdgeReference, GraphQueryResponse } from "./types";
 
@@ -25,6 +26,7 @@ export async function queryGraph(
   const prompt = {
     system: `Answer using only the supplied knowledge graph. Return JSON:
 {"answer":"markdown-free prose","entityIds":["id"],"relationshipIds":["id"]}
+When you mention a graph entity, wrap that mention as [[id|Display Name]] using the entity's exact id and name. Write normal sentences; the wrappers become in-text links to those nodes.
 Cite entities by name. entityIds and relationshipIds must be ids from the graph.
 Include every relationship you used as context in relationshipIds.
 If the graph cannot answer, say so.`,
@@ -82,7 +84,11 @@ If the graph cannot answer, say so.`,
     .map((id) => ({ entityId: id, name: knownEntities.get(id) as string }));
 
   return {
-    answer: parsed.answer || "The graph does not contain enough information to answer.",
+    answer: annotateEntityMentions(
+      parsed.answer || "The graph does not contain enough information to answer.",
+      graph.entities,
+      references.map((ref) => ref.entityId),
+    ),
     references,
     edgeReferences: resolveEdgeReferences(
       graph,
@@ -161,7 +167,7 @@ function mockGraphAnswer(
   }
 
   return {
-    answer,
+    answer: annotateEntityMentions(answer, graph.entities, [...referencedIds]),
     references: graph.entities
       .filter((e) => referencedIds.has(e.id))
       .map((e) => ({ entityId: e.id, name: e.name })),

@@ -1,4 +1,3 @@
-import { DEMO_QUERY } from "./demo";
 import type { QueryTemplate } from "./types";
 
 export const QUERY_TEMPLATES: QueryTemplate[] = [
@@ -22,4 +21,6 @@ export const QUERY_TEMPLATES: QueryTemplate[] = [
   },
 ];
 
-export const DEFAULT_QUERY = QUERY_TEMPLATES[0]?.query ?? DEMO_QUERY;
+export const EXAMPLE_QUERIES = QUERY_TEMPLATES.map((item) => item.query);
+
+export const DEFAULT_QUERY = "";

@@ -2,12 +2,15 @@ import type {
   Entity,
   EvidenceRecord,
   Relationship,
+  RelationshipStatus,
   SearchResult,
   SessionView,
   Validation,
 } from "./types";
+import { normalizeRelationshipStatus } from "./types";
 
 export type DecisionFilter = "ALL" | "CONTRADICTED" | "UNCERTAIN" | "PENDING" | "SUPPORTED";
+export type StatusFilter = "ALL" | RelationshipStatus;
 
 export type ClaimRow = {
   relationshipId: string;
@@ -17,11 +20,14 @@ export type ClaimRow = {
   targetName: string;
   type: string;
   claim: string;
+  status: RelationshipStatus;
   decision: string;
   confidence?: number;
   model: "jev" | "mock";
   snippet: string;
   url?: string;
+  extraUrls: string[];
+  sourceCount: number;
   publishedAt?: string;
 };
 
@@ -50,13 +56,11 @@ export function buildClaimRows(view: {
   const rows = view.relationships.map((rel) => {
     const evidence = view.evidence[rel.id];
     const validation = view.validations[rel.id] ?? evidence?.validation;
-    const url =
-      evidence?.sources[0]?.url ||
-      rel.sourceUrl ||
-      view.sources.find((source) => source.url === rel.sourceUrl)?.url;
-    const publishedAt =
-      evidence?.sources[0]?.publishedAt ||
-      view.sources.find((source) => source.url === url)?.publishedAt;
+    const stacked = evidence?.sources?.length
+      ? evidence.sources
+      : view.sources.filter((source) => source.url === rel.sourceUrl);
+    const url = stacked[0]?.url || rel.sourceUrl;
+    const extraUrls = stacked.slice(1).map((item) => item.url);
     return {
       relationshipId: rel.id,
       sourceId: rel.source,
@@ -65,19 +69,27 @@ export function buildClaimRows(view: {
       targetName: names.get(rel.target) ?? rel.target,
       type: rel.type,
       claim: rel.claim,
+      status: normalizeRelationshipStatus(rel.status),
       decision: normalizeDecision(validation?.decision),
       confidence: validation?.confidence,
       model: validation?.model ?? "mock",
-      snippet:
-        evidence?.snippet || rel.evidenceSnippet || rel.claim,
+      snippet: evidence?.snippet || rel.evidenceSnippet || rel.claim,
       url,
-      publishedAt,
+      extraUrls,
+      sourceCount: Math.max(stacked.length, url ? 1 : 0),
+      publishedAt: oldestPublished(stacked) || view.sources.find((source) => source.url === url)?.publishedAt,
     } satisfies ClaimRow;
   });
 
   return rows.sort((a, b) => {
     const rank = (RANK[a.decision] ?? 4) - (RANK[b.decision] ?? 4);
     if (rank !== 0) return rank;
+    const aDate = a.publishedAt ? 1 : 0;
+    const bDate = b.publishedAt ? 1 : 0;
+    if (aDate !== bDate) return aDate - bDate;
+    if (a.publishedAt && b.publishedAt && a.publishedAt !== b.publishedAt) {
+      return a.publishedAt.localeCompare(b.publishedAt);
+    }
     return a.sourceName.localeCompare(b.targetName);
   });
 }
@@ -100,12 +112,48 @@ export function decisionCounts(rows: ClaimRow[]) {
   return counts;
 }
 
-export function filterClaimRows(rows: ClaimRow[], filter: DecisionFilter): ClaimRow[] {
-  if (filter === "ALL") return rows;
-  return rows.filter((row) => row.decision === filter);
+export function statusCounts(rows: ClaimRow[]) {
+  const counts = { deployed: 0, announced: 0, unclear: 0 };
+  for (const row of rows) counts[row.status] += 1;
+  return counts;
+}
+
+export function filterClaimRows(
+  rows: ClaimRow[],
+  decision: DecisionFilter,
+  status: StatusFilter = "ALL",
+): ClaimRow[] {
+  return rows.filter((row) => {
+    if (decision !== "ALL" && row.decision !== decision) return false;
+    if (status !== "ALL" && row.status !== status) return false;
+    return true;
+  });
+}
+
+export function claimAuditSummary(counts: ReturnType<typeof decisionCounts>) {
+  const disagreements = counts.CONTRADICTED + counts.UNCERTAIN;
+  return {
+    line: `Supported ${counts.SUPPORTED} · Uncertain ${counts.UNCERTAIN} · Contradicted ${counts.CONTRADICTED}`,
+    warning:
+      disagreements === 0
+        ? "No disagreements found — treat as a first cut, not an audit."
+        : null,
+  };
 }
 
 export function formatAsOf(view: Pick<SessionView, "frozenAt" | "createdAt">): string {
   const stamp = view.frozenAt ?? view.createdAt;
   return new Date(stamp).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
+
+export function formatPublished(value: string | undefined): string {
+  return value?.slice(0, 10) || "undated";
+}
+
+function oldestPublished(sources: SearchResult[]): string | undefined {
+  const dates = sources
+    .map((item) => item.publishedAt?.slice(0, 10))
+    .filter((item): item is string => Boolean(item))
+    .sort();
+  return dates[0];
 }

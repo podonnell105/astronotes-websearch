@@ -1,7 +1,9 @@
+import { availableDataSources } from "@/lib/config";
 import { ResearchWorkspace } from "@/components/ResearchWorkspace";
 import { getCurrentUser } from "@/lib/auth";
 import { stripeEnabled } from "@/lib/credits";
 import { getSession, toSessionView } from "@/lib/store";
+import { sourcePolicyFromSearchParams } from "@/lib/sources";
 import { notFound, redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -11,19 +13,30 @@ export default async function ResearchPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    allow?: string;
+    deny?: string;
+    from?: string;
+    to?: string;
+    role?: string;
+    data?: string;
+  }>;
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   const { id } = await params;
+  const catalog = availableDataSources();
   if (id === "new") {
-    const { q } = await searchParams;
+    const query = await searchParams;
     return (
       <ResearchWorkspace
         user={user}
         stripeEnabled={stripeEnabled()}
         autoStart
-        initialQuery={q?.trim() || undefined}
+        initialQuery={query.q?.trim() || undefined}
+        initialPolicy={sourcePolicyFromSearchParams(query)}
+        availableDataSources={catalog}
       />
     );
   }
@@ -34,6 +47,7 @@ export default async function ResearchPage({
       user={user}
       stripeEnabled={stripeEnabled()}
       initialSession={toSessionView(session)}
+      availableDataSources={catalog}
     />
   );
 }

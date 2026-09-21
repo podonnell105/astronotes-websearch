@@ -1,3 +1,5 @@
+import type { AnalystRole, DataSourceId } from "./dataCatalog";
+
 export type EntityType = string;
 
 export const ENTITY_TYPES = [
@@ -78,11 +80,36 @@ export type SearchResult = {
   publishedAt?: string;
 };
 
+export type SourcePolicy = {
+  allowDomains: string[];
+  denyDomains: string[];
+  publishedAfter?: string;
+  publishedBefore?: string;
+  onlyUrls: string[];
+  role: AnalystRole;
+  dataSources: DataSourceId[];
+};
+
+export type DroppedReason =
+  | "denied"
+  | "not_allowlisted"
+  | "out_of_range"
+  | "not_in_url_list"
+  | "failed_fetch";
+
+export type DroppedSource = {
+  url: string;
+  title?: string;
+  reason: DroppedReason;
+};
+
 export type Entity = {
   id: string;
   name: string;
   type: EntityType;
 };
+
+export type RelationshipStatus = "deployed" | "announced" | "unclear";
 
 export type Relationship = {
   id: string;
@@ -90,9 +117,16 @@ export type Relationship = {
   target: string;
   type: string;
   claim: string;
+  status: RelationshipStatus;
   sourceUrl?: string;
   evidenceSnippet?: string;
 };
+
+export function normalizeRelationshipStatus(value: unknown): RelationshipStatus {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "deployed" || raw === "announced" || raw === "unclear") return raw;
+  return "unclear";
+}
 
 export type ValidationDecision = "SUPPORTED" | "CONTRADICTED" | "UNCERTAIN";
 
@@ -166,6 +200,11 @@ export type ResearchEvent =
       validations?: number;
     }
   | {
+      type: "dropped_sources";
+      policy: SourcePolicy;
+      dropped: DroppedSource[];
+    }
+  | {
       type: "complete";
       sessionId: string;
     }
@@ -200,6 +239,7 @@ export type ChatTurn = {
   role: "user" | "assistant";
   text: string;
   model?: "openai" | "mock";
+  references?: GraphQueryReference[];
   edgeReferences?: GraphEdgeReference[];
 };
 
@@ -217,6 +257,8 @@ export type SessionView = {
   validations: Record<string, Validation>;
   evidence: Record<string, EvidenceRecord>;
   sources: SearchResult[];
+  sourcePolicy: SourcePolicy;
+  droppedSources: DroppedSource[];
   logs: Extract<ResearchEvent, { type: "log" }>[];
   chat: ChatTurn[];
   status: "running" | "complete" | "error";

@@ -2,11 +2,22 @@
 
 import {
   buildClaimRows,
+  claimAuditSummary,
   decisionCounts,
   filterClaimRows,
+  formatPublished,
+  statusCounts,
   type DecisionFilter,
+  type StatusFilter,
 } from "@/lib/claims";
-import type { EvidenceRecord, Entity, Relationship, SearchResult, Validation } from "@/lib/types";
+import { hostnameOf } from "@/lib/sources";
+import type {
+  EvidenceRecord,
+  Entity,
+  Relationship,
+  SearchResult,
+  Validation,
+} from "@/lib/types";
 import { useMemo, useState } from "react";
 
 const FILTERS: DecisionFilter[] = [
@@ -16,6 +27,8 @@ const FILTERS: DecisionFilter[] = [
   "PENDING",
   "SUPPORTED",
 ];
+
+const STATUSES: StatusFilter[] = ["ALL", "deployed", "announced", "unclear"];
 
 export function ClaimTable({
   entities,
@@ -35,6 +48,7 @@ export function ClaimTable({
   onSelect: (relationshipId: string) => void;
 }) {
   const [filter, setFilter] = useState<DecisionFilter>("ALL");
+  const [status, setStatus] = useState<StatusFilter>("ALL");
   const rows = useMemo(
     () =>
       buildClaimRows({
@@ -47,37 +61,73 @@ export function ClaimTable({
     [entities, relationships, validations, evidence, sources],
   );
   const counts = decisionCounts(rows);
-  const visible = filterClaimRows(rows, filter);
+  const statuses = statusCounts(rows);
+  const audit = claimAuditSummary(counts);
+  const visible = filterClaimRows(rows, filter, status);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2">
-        {FILTERS.map((item) => {
-          const count =
-            item === "ALL"
-              ? rows.length
-              : item === "CONTRADICTED"
-                ? counts.CONTRADICTED
-                : item === "UNCERTAIN"
-                  ? counts.UNCERTAIN
-                  : item === "PENDING"
-                    ? counts.PENDING
-                    : counts.SUPPORTED;
-          return (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setFilter(item)}
-              className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ${
-                filter === item
-                  ? "border-line-strong text-ink"
-                  : "border-line text-muted hover:text-ink"
-              }`}
-            >
-              {item === "ALL" ? "All" : item.toLowerCase()} {count}
-            </button>
-          );
-        })}
+      <div className="flex shrink-0 flex-col gap-1 border-b border-line px-4 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {FILTERS.map((item) => {
+            const count =
+              item === "ALL"
+                ? rows.length
+                : item === "CONTRADICTED"
+                  ? counts.CONTRADICTED
+                  : item === "UNCERTAIN"
+                    ? counts.UNCERTAIN
+                    : item === "PENDING"
+                      ? counts.PENDING
+                      : counts.SUPPORTED;
+            return (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setFilter(item)}
+                className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ${
+                  filter === item
+                    ? "border-line-strong text-ink"
+                    : "border-line text-muted hover:text-ink"
+                }`}
+              >
+                {item === "ALL" ? "All" : item.toLowerCase()} {count}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {STATUSES.map((item) => {
+            const count =
+              item === "ALL"
+                ? rows.length
+                : item === "deployed"
+                  ? statuses.deployed
+                  : item === "announced"
+                    ? statuses.announced
+                    : statuses.unclear;
+            return (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setStatus(item)}
+                className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ${
+                  status === item
+                    ? "border-line-strong text-ink"
+                    : "border-line text-muted hover:text-ink"
+                }`}
+              >
+                {item === "ALL" ? "All status" : item} {count}
+              </button>
+            );
+          })}
+        </div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+          {audit.line}
+        </div>
+        {audit.warning && (
+          <div className="text-[11px] text-dim">{audit.warning}</div>
+        )}
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {visible.length === 0 ? (
@@ -87,6 +137,7 @@ export function ClaimTable({
             <thead>
               <tr>
                 <th>Decision</th>
+                <th>Status</th>
                 <th>Actors</th>
                 <th>Claim</th>
                 <th>Source</th>
@@ -113,6 +164,11 @@ export function ClaimTable({
                       </div>
                     </td>
                     <td>
+                      <div className={`claim-status claim-status--${row.status}`}>
+                        {row.status}
+                      </div>
+                    </td>
+                    <td>
                       <div className="text-ink">{row.sourceName}</div>
                       <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-accent">
                         {row.type}
@@ -134,16 +190,15 @@ export function ClaimTable({
                           onClick={(event) => event.stopPropagation()}
                           className="font-mono text-[10px] uppercase tracking-[0.12em] text-accent hover:text-ink"
                         >
-                          {hostLabel(row.url)}
+                          {hostnameOf(row.url) || "Source"}
+                          {row.sourceCount > 1 ? ` +${row.sourceCount - 1}` : ""}
                         </a>
                       ) : (
                         <span className="text-dim">—</span>
                       )}
-                      {row.publishedAt && (
-                        <div className="mt-1 font-mono text-[10px] text-dim">
-                          {row.publishedAt}
-                        </div>
-                      )}
+                      <div className="mt-1 font-mono text-[10px] text-dim">
+                        {formatPublished(row.publishedAt)}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -154,12 +209,4 @@ export function ClaimTable({
       </div>
     </div>
   );
-}
-
-function hostLabel(url: string) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "Source";
-  }
 }

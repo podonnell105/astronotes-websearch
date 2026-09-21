@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import type { RuntimeMode } from "./types";
 
-const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_DIR =
+  process.env.DATA_DIR?.trim() ||
+  (process.env.VERCEL ? "/tmp/astronotes" : path.join(process.cwd(), "data"));
 const DB_PATH = path.join(DATA_DIR, "astronotes.json");
 
 export type UserRow = {

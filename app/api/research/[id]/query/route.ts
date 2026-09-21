@@ -31,6 +31,7 @@ export async function POST(
         role: "assistant",
         text: result.answer,
         model: result.model,
+        references: result.references,
         edgeReferences: result.edgeReferences,
       },
     ];
