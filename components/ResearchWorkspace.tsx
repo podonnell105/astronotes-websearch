@@ -135,10 +135,6 @@ export function ResearchWorkspace({
   const [chatMessages, setChatMessages] = useState<ChatTurn[]>(seeded?.chat ?? []);
   const [queryLoading, setQueryLoading] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
-  const desktopDefaultView: MainView =
-    seeded && seeded.status === "complete" && seeded.relationships.length > 0
-      ? "claims"
-      : "graph";
   const [view, setView] = useState<MainView>("graph");
   const [phonePane, setPhonePane] = useState<PhonePane>("graph");
   const isPhone = useIsPhone();
@@ -175,14 +171,6 @@ export function ResearchWorkspace({
   useEffect(() => {
     policyRef.current = sourcePolicy;
   }, [sourcePolicy]);
-
-  useEffect(() => {
-    if (isPhone) {
-      setView("graph");
-      return;
-    }
-    if (desktopDefaultView === "claims") setView("claims");
-  }, [desktopDefaultView, isPhone]);
 
   const resetGraph = () => {
     setEntities([]);
