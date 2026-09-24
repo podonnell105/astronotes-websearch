@@ -3,6 +3,7 @@ import { DEMO_ENTITIES, DEMO_RELATIONSHIPS } from "./demo";
 import { EXTRACT_MODELS } from "./models";
 import type { Document } from "./search";
 import { IDENTITY_REL_TYPES, isChromeText, rankSearchResults, sourceTrust } from "./sourceQuality";
+import { parseEpisodeTime } from "./timeline";
 import type { Entity, Relationship, RelationshipStatus } from "./types";
 import { normalizeEntityType, normalizeRelationshipStatus } from "./types";
 
@@ -23,17 +24,19 @@ Return JSON:
     "claim": "one sentence claim",
     "status": "announced",
     "sourceUrl": "https://...",
-    "evidenceSnippet": "short supporting passage from the documents"
+    "evidenceSnippet": "short supporting passage from the documents",
+    "time": { "start": "2002", "end": "2014", "estimated": false }
   }]
 }
 
 Entity types: exactly one lowercase noun. Prefer: person, organization, company, technology, mission, location, product, spacecraft, concept, service, event, process. If none fit, still use a single noun (law, fund, school, cycle). Never use phrases or blanks.
-Relationship types: concise verbs such as partners_with, develops, owns, operates, funds, acquired, supplies, works_with, launches, uses, member_of, represents, educated_at, minister_of, born_in, provides, explains, announced_for, contracts.
+Relationship types: concise verbs such as partners_with, develops, owns, operates, funds, acquired, supplies, works_with, launches, uses, member_of, represents, educated_at, minister_of, born_in, lived_in, founded, cofounded, created, provides, explains, announced_for, contracts.
 Every relationship MUST include status: exactly one of deployed, announced, unclear.
 - announced = press release, selection, award, "will build", or deploy-intent without evidence of operations
 - deployed = operating, launched, contracted delivery already in service, on-orbit, or on-surface, or a USASpending award record with amount and dates. Also use deployed for identity that already happened: cofounded, served as CEO, is a partner, graduated, chairs.
 - unclear = documents do not establish either
 Align verbs with status: announced_for / selected_for for announcements; operates / contracts for in-service work; founded / partner_at / educated_at for identity.
+Episode relationships (founded, cofounded, created, acquired, acquired_by, lived_in, born_in, died_in, educated_at, partner_at, chairs, chairman, joined, relocated_to) MUST include time when the documents give a year: start as YYYY, YYYY-MM, or YYYY-MM-DD; end only for a span; estimated true for circa, early, around, or approximately. Point events (founded, acquired, born_in) have start only. The claim sentence must state the when ("founded SpaceX in 2002", "lived in Austin from 2014 to 2018"). Omit time when the documents do not support a year. Never copy a source publication date as the episode time.
 SEC EDGAR filings (8-K, 10-K, Form D, Form 4), USASpending awards, SAM.gov solicitations, USPTO patents, NIH grants, ClinicalTrials.gov records, GitHub repos, GLEIF LEIs, OpenSanctions flags, and Wayback captures are primary records. Prefer them over press when labeling deployed vs announced. A press "selected by" without an award, filing, trial, or shipped repo remains announced.
 
 Rules:
@@ -200,6 +203,7 @@ function normalizeExtraction(raw: unknown, existing: Entity[] = []): Extraction 
       const id = `${source}__${type}__${target}`;
       if (relSeen.has(id)) continue;
       relSeen.add(id);
+      const time = parseEpisodeTime(r.time);
       relationships.push({
         id,
         source,
@@ -210,6 +214,7 @@ function normalizeExtraction(raw: unknown, existing: Entity[] = []): Extraction 
         sourceUrl: typeof r.sourceUrl === "string" ? r.sourceUrl : undefined,
         evidenceSnippet:
           typeof r.evidenceSnippet === "string" ? r.evidenceSnippet : undefined,
+        ...(time ? { time } : {}),
       });
     }
   }

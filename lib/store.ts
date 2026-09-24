@@ -15,6 +15,7 @@ import type {
   SourcePolicy,
   Validation,
 } from "./types";
+import { parseEpisodeTime } from "./timeline";
 import { normalizeRelationshipStatus } from "./types";
 
 export type SessionRecord = {
@@ -249,7 +250,11 @@ async function loadSession(id: string): Promise<SessionRecord | undefined> {
     relationships: new Map(
       (payload.relationships ?? []).map((rel) => [
         rel.id,
-        { ...rel, status: normalizeRelationshipStatus(rel.status) },
+        {
+          ...rel,
+          status: normalizeRelationshipStatus(rel.status),
+          time: parseEpisodeTime(rel.time),
+        },
       ]),
     ),
     validations: new Map(payload.validations ?? []),

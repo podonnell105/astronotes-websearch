@@ -50,6 +50,12 @@ export const IDENTITY_REL_TYPES = new Set([
   "partner_at",
   "educated_at",
   "created",
+  "acquired",
+  "acquired_by",
+  "lived_in",
+  "born_in",
+  "died_in",
+  "joined",
 ]);
 
 export function sourceTrust(url: string): number {

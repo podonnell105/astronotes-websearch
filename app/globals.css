@@ -363,6 +363,116 @@ html.light .pixel-compose-motif {
   color: var(--accent);
 }
 
+.entity-connection-when {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.entity-info--raised {
+  bottom: 118px;
+}
+
+.graph-timeline {
+  flex-shrink: 0;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  padding: 8px 12px 10px;
+}
+
+.graph-timeline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.graph-timeline-axis {
+  position: relative;
+  min-height: 48px;
+}
+
+.graph-timeline-line {
+  position: absolute;
+  top: 8px;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+.graph-timeline-tick {
+  position: absolute;
+  top: 6px;
+  width: 1px;
+  height: 5px;
+  background: var(--handle);
+  transform: translateX(-50%);
+}
+
+.graph-timeline-tick span {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.graph-timeline-mark {
+  position: absolute;
+  z-index: 1;
+  max-width: 46%;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  background: var(--canvas);
+  padding: 1px 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.graph-timeline-mark.is-point {
+  width: auto;
+  transform: translateX(-50%);
+}
+
+.graph-timeline-mark.is-range {
+  min-width: 12px;
+}
+
+.graph-timeline-mark.is-estimated {
+  border-style: dashed;
+}
+
+.graph-timeline-mark:hover,
+.graph-timeline-mark.is-focused {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.graph-timeline-mark.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-ring);
+}
+
+.graph-timeline-mark-label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.graph-timeline-mark.is-selected .graph-timeline-mark-label,
+.graph-timeline-mark.is-focused .graph-timeline-mark-label {
+  color: var(--accent);
+}
+
 .entity-connection-sep {
   color: var(--dim);
 }

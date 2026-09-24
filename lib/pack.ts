@@ -63,9 +63,9 @@ export function buildPackMarkdown(view: SessionView): string {
       continue;
     }
     lines.push(
-      `| Decision | ${esc("Actor")} | Relation | ${esc("Actor")} | Claim | Confidence | Validator | Sources | Published |`,
+      `| Decision | When | ${esc("Actor")} | Relation | ${esc("Actor")} | Claim | Confidence | Validator | Sources | Published |`,
     );
-    lines.push(`| --- | --- | --- | --- | --- | --- | --- | --- | --- |`);
+    lines.push(`| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |`);
     for (const row of section) lines.push(markdownRow(row));
     lines.push("");
   }
@@ -96,6 +96,7 @@ export function buildPackCsv(view: SessionView): string {
     "source",
     "relation",
     "target",
+    "when",
     "claim",
     "confidence",
     "validator",
@@ -111,6 +112,7 @@ export function buildPackCsv(view: SessionView): string {
       row.sourceName,
       row.type,
       row.targetName,
+      row.when,
       row.claim,
       row.confidence == null ? "" : String(Math.round(row.confidence * 100) / 100),
       row.model,
@@ -129,7 +131,7 @@ function markdownRow(row: ClaimRow): string {
   const confidence =
     row.confidence == null ? "" : `${Math.round(row.confidence * 100)}%`;
   const urls = [row.url, ...row.extraUrls].filter(Boolean).join(" ");
-  return `| ${row.decision} | ${esc(row.sourceName)} | ${esc(row.type)} | ${esc(row.targetName)} | ${esc(row.claim)} | ${confidence} | ${row.model} | ${esc(urls)} | ${formatPublished(row.publishedAt)} |`;
+  return `| ${row.decision} | ${esc(row.when || "—")} | ${esc(row.sourceName)} | ${esc(row.type)} | ${esc(row.targetName)} | ${esc(row.claim)} | ${confidence} | ${row.model} | ${esc(urls)} | ${formatPublished(row.publishedAt)} |`;
 }
 
 function primaryCoverLines(sources: SessionView["sources"]): string[] {

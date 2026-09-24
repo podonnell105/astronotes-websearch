@@ -1,5 +1,7 @@
+import { formatEpisodeTime } from "./timeline";
 import type {
   Entity,
+  EpisodeTime,
   EvidenceRecord,
   Relationship,
   RelationshipStatus,
@@ -29,6 +31,8 @@ export type ClaimRow = {
   extraUrls: string[];
   sourceCount: number;
   publishedAt?: string;
+  time?: EpisodeTime;
+  when: string;
 };
 
 const RANK: Record<string, number> = {
@@ -78,6 +82,8 @@ export function buildClaimRows(view: {
       extraUrls,
       sourceCount: Math.max(stacked.length, url ? 1 : 0),
       publishedAt: oldestPublished(stacked) || view.sources.find((source) => source.url === url)?.publishedAt,
+      time: rel.time,
+      when: formatEpisodeTime(rel.time),
     } satisfies ClaimRow;
   });
 

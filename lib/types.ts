@@ -112,6 +112,12 @@ export type Entity = {
 
 export type RelationshipStatus = "deployed" | "announced" | "unclear";
 
+export type EpisodeTime = {
+  start: string;
+  end?: string;
+  estimated?: boolean;
+};
+
 export type Relationship = {
   id: string;
   source: string;
@@ -121,6 +127,7 @@ export type Relationship = {
   status: RelationshipStatus;
   sourceUrl?: string;
   evidenceSnippet?: string;
+  time?: EpisodeTime;
 };
 
 export function normalizeRelationshipStatus(value: unknown): RelationshipStatus {

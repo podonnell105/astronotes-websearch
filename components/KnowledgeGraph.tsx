@@ -1,6 +1,7 @@
 "use client";
 
 import { edgeLanes, layoutGraph } from "@/lib/layout";
+import { buildTimeline, formatEpisodeTime } from "@/lib/timeline";
 import {
   entityTypeChip,
   type Entity,
@@ -224,7 +225,7 @@ function GraphInner({
       source: rel.source,
       target: rel.target,
       type: "audit",
-      label: rel.type,
+      label: rel.time ? `${rel.type} ${formatEpisodeTime(rel.time)}` : rel.type,
     }));
     const placed = layoutGraph(rawNodes, rawEdges, "TB") as Node<EntityData>[];
     const lanes = edgeLanes(placed, rawEdges);
@@ -374,6 +375,87 @@ function GraphInner({
             color="var(--grid)"
           />
         </ReactFlow>
+      </div>
+      <TimelineStrip
+        relationships={relationships}
+        selectedRelationshipId={selectedRelationshipId}
+        focusedRelationshipIds={focusedRelationshipIds}
+        onSelect={onSelectRelationship}
+      />
+    </div>
+  );
+}
+
+function TimelineStrip({
+  relationships,
+  selectedRelationshipId,
+  focusedRelationshipIds,
+  onSelect,
+}: {
+  relationships: Relationship[];
+  selectedRelationshipId: string | null;
+  focusedRelationshipIds: string[];
+  onSelect: (id: string | null) => void;
+}) {
+  const timeline = useMemo(() => buildTimeline(relationships), [relationships]);
+  const cited = useMemo(
+    () => new Set(focusedRelationshipIds),
+    [focusedRelationshipIds],
+  );
+  if (!timeline) return null;
+
+  const laneCount = Math.max(
+    1,
+    ...timeline.marks.map((mark) => mark.lane + 1),
+  );
+
+  return (
+    <div className="graph-timeline">
+      <div className="graph-timeline-head">
+        <div className="label">Timeline</div>
+        <div className="font-mono text-[10px] text-dim">
+          {timeline.startLabel} – {timeline.endLabel}
+        </div>
+      </div>
+      <div
+        className="graph-timeline-axis"
+        style={{ height: 28 + laneCount * 22 }}
+      >
+        <div className="graph-timeline-line" />
+        {timeline.ticks.map((tick) => (
+          <div
+            key={tick.label}
+            className="graph-timeline-tick"
+            style={{ left: `${tick.position * 100}%` }}
+          >
+            <span>{tick.label}</span>
+          </div>
+        ))}
+        {timeline.marks.map((mark) => {
+          const selected = selectedRelationshipId === mark.relationshipId;
+          const focused = cited.has(mark.relationshipId);
+          const isRange = mark.width > 0.012;
+          return (
+            <button
+              key={mark.relationshipId}
+              type="button"
+              className={`graph-timeline-mark ${isRange ? "is-range" : "is-point"} ${
+                mark.estimated ? "is-estimated" : ""
+              } ${selected ? "is-selected" : ""} ${focused ? "is-focused" : ""}`}
+              style={{
+                left: `${mark.left * 100}%`,
+                width: isRange ? `${Math.max(mark.width * 100, 1.4)}%` : undefined,
+                top: 16 + mark.lane * 22,
+              }}
+              title={`${mark.type} ${mark.label}`}
+              onClick={() => onSelect(mark.relationshipId)}
+            >
+              <span className="graph-timeline-mark-label">
+                {mark.type} {mark.label}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

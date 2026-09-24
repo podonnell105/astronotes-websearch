@@ -1,5 +1,6 @@
 "use client";
 
+import { formatEpisodeTime } from "@/lib/timeline";
 import {
   entityTypeChip,
   type Entity,
@@ -32,8 +33,10 @@ export function EntityInfoPanel({
   const nameById = new Map(entities.map((item) => [item.id, item.name]));
   const selected = connections.find((rel) => rel.id === selectedRelationshipId);
 
+  const hasTimeline = relationships.some((rel) => rel.time);
+
   return (
-    <aside className="entity-info">
+    <aside className={`entity-info ${hasTimeline ? "entity-info--raised" : ""}`}>
       <div className="entity-info-header">
         <div className="min-w-0">
           <div className="type-chip" title={entity.type}>
@@ -81,6 +84,14 @@ export function EntityInfoPanel({
                         <span className="entity-connection-here">{here}</span>
                         <span className="entity-connection-sep"> - </span>
                         <span className="entity-connection-type">{rel.type}</span>
+                        {formatEpisodeTime(rel.time) ? (
+                          <>
+                            <span className="entity-connection-sep"> </span>
+                            <span className="entity-connection-when">
+                              {formatEpisodeTime(rel.time)}
+                            </span>
+                          </>
+                        ) : null}
                         <span className="entity-connection-sep"> - </span>
                         <span className="entity-connection-peer">{peerName}</span>
                       </>
@@ -89,6 +100,14 @@ export function EntityInfoPanel({
                         <span className="entity-connection-peer">{peerName}</span>
                         <span className="entity-connection-sep"> - </span>
                         <span className="entity-connection-type">{rel.type}</span>
+                        {formatEpisodeTime(rel.time) ? (
+                          <>
+                            <span className="entity-connection-sep"> </span>
+                            <span className="entity-connection-when">
+                              {formatEpisodeTime(rel.time)}
+                            </span>
+                          </>
+                        ) : null}
                         <span className="entity-connection-sep"> - </span>
                         <span className="entity-connection-here">{here}</span>
                       </>

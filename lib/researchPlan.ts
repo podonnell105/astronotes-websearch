@@ -1,6 +1,7 @@
 import { hasOpenAI } from "./config";
 import { PLAN_MODELS } from "./models";
 import { entityMatchesQuery, rankKnownEntities, strategicSearchQuery, type KnownEntity } from "./search";
+import { formatEpisodeTime } from "./timeline";
 import type { Entity, Relationship } from "./types";
 
 export type NeighborhoodFact = {
@@ -46,9 +47,14 @@ const SKIP_FOCUS = new Set([
   "why",
 ]);
 
-type FacetId = "jobs" | "hires" | "product" | "funding";
+type FacetId = "jobs" | "hires" | "product" | "funding" | "timeline";
 
 const FACETS: { id: FacetId; test: RegExp; gap: (subject: string) => string }[] = [
+  {
+    id: "timeline",
+    test: /\b(timeline|history|career|lived|founded|acquired|biography|background|born)\b/i,
+    gap: (subject) => `when ${subject} lived, founded companies, or was acquired`,
+  },
   {
     id: "jobs",
     test: /\b(job postings?|jobs|hiring|careers?|openings?|recruit)/i,
@@ -94,7 +100,9 @@ export function buildNeighborhood(
         const outgoing = rel.source === entity.id;
         const peerId = outgoing ? rel.target : rel.source;
         const peer = nameById.get(peerId) ?? peerId;
-        return outgoing ? `${rel.type} ${peer}` : `${peer} ${rel.type} this`;
+        const when = formatEpisodeTime(rel.time);
+        const fact = outgoing ? `${rel.type} ${peer}` : `${peer} ${rel.type} this`;
+        return when ? `${fact} (${when})` : fact;
       });
     return {
       id: entity.id,
@@ -188,16 +196,19 @@ export function buildResearchQueries(question: string, subjects: string[]): stri
   if (!focus) return [strategicSearchQuery(question)];
 
   const quoted = `"${focus}"`;
-  const queries = [quoted];
   if (!isComplexQuestion(question)) {
     const compact = strategicSearchQuery(question);
-    if (/\bbiograph/i.test(compact)) {
-      return [`${quoted} biography`.slice(0, QUERY_LIMIT)];
+    if (/\bbiograph/i.test(compact) || isHistoryQuestion(question)) {
+      return [`${quoted} biography founded lived dates`.slice(0, QUERY_LIMIT)];
     }
     return [quoted.slice(0, QUERY_LIMIT)];
   }
 
   const facets = detectFacets(question);
+  const queries =
+    facets.includes("timeline") || isHistoryQuestion(question)
+      ? [`${quoted} founded lived acquired dates`]
+      : [quoted];
   if (facets.includes("product")) {
     const product = extras.find(
       (name) => !name.toLowerCase().includes(focus.toLowerCase()),
@@ -224,9 +235,12 @@ export function buildResearchQueries(question: string, subjects: string[]): stri
 
 function gapsFromQuestion(question: string, subject: string): string[] {
   const facets = detectFacets(question);
-  const gaps = FACETS.filter((facet) => facets.includes(facet.id)).map((facet) =>
-    facet.gap(subject),
-  );
+  const gaps = [
+    `when ${subject} lived, founded companies, or was acquired`,
+    ...FACETS.filter((facet) => facets.includes(facet.id)).map((facet) =>
+      facet.gap(subject),
+    ),
+  ];
   if (/personal|famil|born|educat|school|spouse/i.test(question)) {
     gaps.push("personal life", "education", "family");
   }
@@ -240,6 +254,12 @@ function gapsFromQuestion(question: string, subject: string): string[] {
     gaps.push(`missing facts about ${subject}`);
   }
   return uniqueNames(gaps).slice(0, 4);
+}
+
+function isHistoryQuestion(question: string): boolean {
+  return /\b(timeline|history|career|lived|founded|acquired|biography|background|born)\b/i.test(
+    question,
+  );
 }
 
 function isConnectQuestion(question: string): boolean {
@@ -277,7 +297,7 @@ Return JSON only:
 {"subjects":["Name"],"queries":["\\"Name\\" facet"],"allowNewEntities":true,"gaps":["facet"]}
 Rules:
 - Each query is a short web query (under 80 chars), not a paragraph. Put the main person/org in quotes.
-- One facet per query. Aim at MISSING facets. Do not dump already-known related names into the query.
+- One facet per query. Aim at MISSING facets, including when they lived, founded, or were acquired. Do not dump already-known related names into the query.
 - allowNewEntities is true whenever the question needs anything new on the map.
 - allowNewEntities is false only when the question is solely about linking entities already in the neighborhood.
 - gaps: 1–4 short missing facets for the extractor.
@@ -288,7 +308,7 @@ Return JSON only:
 Rules:
 - subjects are the real-world people, companies, or products the question is about.
 - Each query is under 80 characters. Put the main person/org in quotes.
-- One facet per query (overview, product, hiring, jobs, funding).
+- One facet per query (overview, chronology, product, hiring, jobs, funding). Include a chronology query when the subject is a person or company.
 - Never copy the user's paragraph or conversational filler.
 - For multi-part questions, emit a separate query per facet.
 - Do not answer the question.`;

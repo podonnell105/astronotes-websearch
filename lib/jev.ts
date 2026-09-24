@@ -22,11 +22,11 @@ export type JevResult = {
 
 const CLAIM_CRITERIA = {
   SUPPORTED:
-    "The evidence snippet directly supports the claim as stated, including its operational status (deployed vs announced). For identity and role claims (founded, cofounded, CEO, chairman, partner, investor, educated_at), an encyclopedia, Wikipedia, or independent biography stating the role is enough. A first-party About or team page may support that identity sentence if it is a direct factual statement, not a product pitch. A press release or future intent is not enough to support a deployed contract or operations claim.",
+    "The evidence snippet directly supports the claim as stated, including its operational status (deployed vs announced) and any stated date or date range. For identity and role claims (founded, cofounded, CEO, chairman, partner, investor, educated_at), an encyclopedia, Wikipedia, or independent biography stating the role is enough only when the snippet also backs the claimed year or range if one is given. A first-party About or team page may support that identity sentence if it is a direct factual statement, not a product pitch. A press release or future intent is not enough to support a deployed contract or operations claim.",
   CONTRADICTED:
-    "The evidence denies the claimed role, relationship, or status (for example: the named party is not the prime, not selected, or not operating).",
+    "The evidence denies the claimed role, relationship, status, or date (for example: the named party is not the prime, not selected, not operating, or the event happened in a different year).",
   UNCERTAIN:
-    "The source is off-topic, too thin, page chrome, satire treated as fact, a laundry-list of names with no role, or an announcement used to back a deployed contract claim. Use this when the snippet does not clearly confirm or deny the claim as stated.",
+    "The source is off-topic, too thin, page chrome, satire treated as fact, a laundry-list of names with no role, an announcement used to back a deployed contract claim, or a role that is real but whose claimed date or range is missing from the evidence. Use this when the snippet does not clearly confirm or deny the claim as stated.",
 };
 
 const MATCH_CRITERIA = {
@@ -178,6 +178,7 @@ export async function classifyClaims(
     evidence: string;
     sourceUrl?: string;
     status?: string;
+    time?: { start: string; end?: string; estimated?: boolean };
   }[],
 ): Promise<{ result: JevResult; usedMockFallback: boolean; error?: string }> {
   const questions: Record<string, JevChoiceQuestion> = {};
@@ -188,10 +189,11 @@ export async function classifyClaims(
       evidence: item.evidence,
       source_url: item.sourceUrl ?? null,
       status: item.status ?? "unclear",
+      time: item.time ?? null,
     };
     questions[item.id] = {
       type: "choice",
-      instructions: `Does the evidence in claims.${item.id}.evidence directly support the claim in claims.${item.id}.claim, including the claimed status in claims.${item.id}.status? Mark SUPPORTED only if the snippet backs the claim as stated. Identity facts (founded, CEO, partner, educated_at) from Wikipedia, Britannica, or an independent bio are SUPPORTED. Mark CONTRADICTED if the snippet denies the role. Mark UNCERTAIN if the source is off-topic chrome, satire, a name list with no role, or an announcement used to support a deployed contract claim.`,
+      instructions: `Does the evidence in claims.${item.id}.evidence directly support the claim in claims.${item.id}.claim, including the claimed status in claims.${item.id}.status and any date or range in claims.${item.id}.time? Mark SUPPORTED only if the snippet backs the claim as stated. If the claim or time names a year or range, the snippet must support that when. Identity facts (founded, CEO, partner, educated_at) from Wikipedia, Britannica, or an independent bio are SUPPORTED when the role and any stated date match. Mark CONTRADICTED if the snippet denies the role or gives a different date. Mark UNCERTAIN if the source is off-topic chrome, satire, a name list with no role, an announcement used to support a deployed contract claim, or the role is real but the claimed when is missing from the evidence.`,
       criteria: CLAIM_CRITERIA,
     };
   }
@@ -302,13 +304,19 @@ function mockEvaluate(
     const claim = String(item.claim ?? "");
     const evidence = String(item.evidence ?? "");
     const status = String(item.status ?? "unclear");
-    answers[id] = mockClaimDecision(claim, evidence, status);
+    const time = item.time && typeof item.time === "object" ? item.time : null;
+    answers[id] = mockClaimDecision(claim, evidence, status, time);
   }
 
   return { model: "mock", answers };
 }
 
-function mockClaimDecision(claim: string, evidence: string, status = "unclear"): JevAnswer {
+function mockClaimDecision(
+  claim: string,
+  evidence: string,
+  status = "unclear",
+  time: unknown = null,
+): JevAnswer {
   const c = claim.toLowerCase();
   const e = evidence.toLowerCase();
   const claimTokens = tokens(c);
@@ -322,12 +330,20 @@ function mockClaimDecision(claim: string, evidence: string, status = "unclear"):
     /selected|will |intended|announce|to develop and deploy|award/.test(e);
   const operational =
     /operating|in service|launched|on-orbit|on-surface|already delivering/.test(e);
+  const datedUncertain = missingClaimYears(claim, evidence, time);
 
   if (denied) {
     return dist("CONTRADICTED", {
       SUPPORTED: 0.08,
       CONTRADICTED: 0.81,
       UNCERTAIN: 0.11,
+    });
+  }
+  if (datedUncertain) {
+    return dist("UNCERTAIN", {
+      SUPPORTED: 0.2,
+      CONTRADICTED: 0.12,
+      UNCERTAIN: 0.68,
     });
   }
   if (status === "deployed" && announcementOnly && !operational) {
@@ -371,6 +387,23 @@ function namesLikelyMatch(a: string, b: string): boolean {
   const nb = b.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   if (!na || !nb) return false;
   return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+function missingClaimYears(claim: string, evidence: string, time: unknown): boolean {
+  const years = new Set(yearsIn(`${claim} ${timeYears(time)}`));
+  if (years.size === 0) return false;
+  const hay = evidence.toLowerCase();
+  return [...years].every((year) => !hay.includes(year));
+}
+
+function timeYears(time: unknown): string {
+  if (!time || typeof time !== "object") return "";
+  const rec = time as Record<string, unknown>;
+  return `${rec.start ?? ""} ${rec.end ?? ""}`;
+}
+
+function yearsIn(value: string): string[] {
+  return [...value.matchAll(/\b(?:1[5-9]\d{2}|20\d{2}|21\d{2})\b/g)].map((match) => match[0]);
 }
 
 function tokens(value: string): string[] {

@@ -154,6 +154,7 @@ export function ClaimTable({
               <tr>
                 <th>Decision</th>
                 <th>Status</th>
+                <th>When</th>
                 <th>Actors</th>
                 <th>Claim</th>
                 <th>Source</th>
@@ -182,6 +183,11 @@ export function ClaimTable({
                     <td>
                       <div className={`claim-status claim-status--${row.status}`}>
                         {row.status}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink">
+                        {row.when || "—"}
                       </div>
                     </td>
                     <td>

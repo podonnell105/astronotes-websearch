@@ -390,6 +390,7 @@ export async function runResearch(
             evidence: excerpts.get(rel.id) || rel.claim,
             sourceUrl: rel.sourceUrl,
             status: rel.status,
+            time: rel.time,
           })),
         ),
       ),
