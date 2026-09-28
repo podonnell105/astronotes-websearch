@@ -59,7 +59,9 @@ export async function POST(request: Request) {
           await runResearch(query, emit, sessionId, {
             preferExistingLinks,
             userId: user.id,
-            sourcePolicy: normalizeSourcePolicy(body.sourcePolicy),
+            ...(body.sourcePolicy != null
+              ? { sourcePolicy: normalizeSourcePolicy(body.sourcePolicy) }
+              : {}),
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Research failed";

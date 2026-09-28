@@ -48,6 +48,7 @@ Rules:
 - sourceUrl must be the most independent document in this payload that states the fact. Prefer wikipedia.org, britannica.com, .gov, and major news over the subject's own website, YouTube, retailers, and Goodreads
 - evidenceSnippet must be a short quote copied from that same document's text, not a page title or nav chrome
 - if subjects are provided, ignore documents that are not about those people, companies, or products
+- if gaps are provided, those are the asked facets. Extract them first (donated_to, declared_interest, funds). Do not fill the graph with a CV of offices, birthplace, or departments when the asked facet is donors, donations, gifts, or fundraising
 - do not extract fictional characters, TV plot, or satire as real-world involvement unless the query is about that work
 - do not only emit high-confidence PR facts; include announcement-only claims and conflict or absence claims when the documents support them
 - if the same pair has both an announcement and a weaker operational claim, extract both with distinct types and matching status
@@ -250,6 +251,19 @@ function mappedId(value: string, idMap: Map<string, string>, existing: Entity[])
     (entity) => entity.id === proposed || slugify(entity.name) === proposed || sameName(entity.name, value),
   );
   return known?.id ?? proposed;
+}
+
+export function mergeExtractions(parts: Extraction[]): Extraction {
+  const entities = new Map<string, Entity>();
+  const relationships = new Map<string, Relationship>();
+  for (const part of parts) {
+    for (const entity of part.entities) entities.set(entity.id, entity);
+    for (const rel of part.relationships) relationships.set(rel.id, rel);
+  }
+  return {
+    entities: [...entities.values()],
+    relationships: [...relationships.values()],
+  };
 }
 
 export function attachNewEntities(

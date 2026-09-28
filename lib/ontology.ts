@@ -19,6 +19,7 @@ export const IDENTIFIER_SCHEMES = {
   bioguide: "bioguide",
   fecCandidate: "fec.candidate",
   oireachtasMember: "oireachtas.member",
+  niAssemblyMember: "niassembly.person",
   europarlMep: "europarl.mep",
   lei: "lei",
   companiesHouse: "companies_house.number",

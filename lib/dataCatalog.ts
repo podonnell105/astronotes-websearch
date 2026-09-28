@@ -17,6 +17,7 @@ export const DATA_SOURCE_IDS = [
   "electoral_commission",
   "contracts_finder",
   "oireachtas",
+  "ni_assembly",
   "lobbying_ie",
   "congress_gov",
   "openfec",
@@ -89,6 +90,7 @@ export const DATA_CATALOG: DataSourceDef[] = [
   { id: "electoral_commission", label: "Electoral Commission", host: "electoralcommission.org.uk" },
   { id: "contracts_finder", label: "Contracts Finder / Find a Tender", host: "contractsfinder.service.gov.uk" },
   { id: "oireachtas", label: "Houses of the Oireachtas", host: "oireachtas.ie" },
+  { id: "ni_assembly", label: "NI Assembly members and interests", host: "niassembly.gov.uk" },
   { id: "lobbying_ie", label: "lobbying.ie", host: "lobbying.ie" },
   {
     id: "congress_gov",
@@ -124,6 +126,7 @@ export const ROLE_PRESETS: Record<Exclude<AnalystRole, "custom">, DataSourceId[]
     "electoral_commission",
     "contracts_finder",
     "oireachtas",
+    "ni_assembly",
     "lobbying_ie",
     "congress_gov",
     "openfec",

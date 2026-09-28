@@ -16,8 +16,6 @@ import { hasResearchIntent } from "@/lib/researchIntent";
 import {
   emptySourcePolicy,
   formatSourcePolicy,
-  readStoredSourcePolicy,
-  sourcePolicyActive,
 } from "@/lib/sources";
 import type {
   AuthUser,
@@ -34,8 +32,6 @@ import type {
   SourcePolicy,
   Validation,
 } from "@/lib/types";
-import type { DataSourceId } from "@/lib/dataCatalog";
-import { DEFAULT_AVAILABLE_SOURCES } from "@/lib/dataCatalog";
 import {
   CHAT_OPEN_KEY,
   FEED_OPEN_KEY,
@@ -85,19 +81,15 @@ export function ResearchWorkspace({
   stripeEnabled = false,
   initialSession = null,
   initialQuery,
-  initialPolicy,
   autoStart = false,
   readOnly = false,
-  availableDataSources = DEFAULT_AVAILABLE_SOURCES,
 }: {
   user?: AuthUser | null;
   stripeEnabled?: boolean;
   initialSession?: SessionView | null;
   initialQuery?: string;
-  initialPolicy?: SourcePolicy;
   autoStart?: boolean;
   readOnly?: boolean;
-  availableDataSources?: DataSourceId[];
 }) {
   const router = useRouter();
   const seeded = initialSession ? applyView(initialSession) : null;
@@ -145,7 +137,7 @@ export function ResearchWorkspace({
   const [credits, setCredits] = useState(user?.credits ?? 0);
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [sourcePolicy, setSourcePolicy] = useState<SourcePolicy>(
-    seeded?.sourcePolicy ?? initialPolicy ?? emptySourcePolicy(),
+    seeded?.sourcePolicy ?? emptySourcePolicy(),
   );
   const [droppedSources, setDroppedSources] = useState<DroppedSource[]>(
     seeded?.droppedSources ?? [],
@@ -153,7 +145,6 @@ export function ResearchWorkspace({
   const runStartedAtRef = useRef<number | null>(null);
   const sessionIdRef = useRef<string | null>(sessionId);
   const autoStarted = useRef(false);
-  const policyRef = useRef(sourcePolicy);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = usePersistentBoolean(CHAT_OPEN_KEY, true);
   const [feedOpen, setFeedOpen] = usePersistentBoolean(FEED_OPEN_KEY, true);
@@ -167,10 +158,6 @@ export function ResearchWorkspace({
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
-
-  useEffect(() => {
-    policyRef.current = sourcePolicy;
-  }, [sourcePolicy]);
 
   const resetGraph = () => {
     setEntities([]);
@@ -347,7 +334,6 @@ export function ResearchWorkspace({
           query: nextQuery,
           ...(extending && sessionId ? { sessionId } : {}),
           ...(options?.preferExistingLinks ? { preferExistingLinks: true } : {}),
-          sourcePolicy: policyRef.current,
         }),
       });
       if (!response.ok || !response.body) {
@@ -386,12 +372,6 @@ export function ResearchWorkspace({
     if (!autoStart || initialSession) return;
     const next = (initialQuery ?? query).trim();
     if (!next) return;
-    const stored = readStoredSourcePolicy();
-    if (stored) {
-      const merged = mergePolicies(stored, initialPolicy ?? emptySourcePolicy());
-      setSourcePolicy(merged);
-      policyRef.current = merged;
-    }
     const timer = window.setTimeout(() => {
       if (autoStarted.current) return;
       autoStarted.current = true;
@@ -613,7 +593,6 @@ export function ResearchWorkspace({
             >
               As of {formatAsOf({ frozenAt: asOfStamp, createdAt: asOfStamp })}
               {droppedSources.length > 0 ? ` · Dropped ${droppedSources.length}` : ""}
-              {sourcePolicyActive(sourcePolicy) ? " · Sources" : ""}
             </button>
           )}
           <div className="hidden md:contents">
@@ -633,9 +612,6 @@ export function ResearchWorkspace({
             onQuery={setQuery}
             onSubmit={runResearch}
             disabled={status === "running"}
-            policy={sourcePolicy}
-            onPolicy={setSourcePolicy}
-            availableDataSources={availableDataSources}
           />
         </div>
       ) : (
@@ -651,9 +627,6 @@ export function ResearchWorkspace({
                   compact
                   onNewGraph={startNewGraph}
                   onCollapse={() => setSearchOpen(false)}
-                  policy={sourcePolicy}
-                  onPolicy={setSourcePolicy}
-                  availableDataSources={availableDataSources}
                 />
                 {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
               </div>
@@ -918,7 +891,6 @@ export function ResearchWorkspace({
             <ResearchFeed
               events={logs}
               stats={stats}
-              sources={sources}
               collapsed={!feedOpen}
               onToggle={() => setFeedOpen((open) => !open)}
             />
@@ -927,18 +899,6 @@ export function ResearchWorkspace({
       )}
     </AppShell>
   );
-}
-
-function mergePolicies(primary: SourcePolicy, fallback: SourcePolicy): SourcePolicy {
-  return {
-    allowDomains: primary.allowDomains.length ? primary.allowDomains : fallback.allowDomains,
-    denyDomains: [...new Set([...fallback.denyDomains, ...primary.denyDomains])],
-    publishedAfter: primary.publishedAfter || fallback.publishedAfter,
-    publishedBefore: primary.publishedBefore || fallback.publishedBefore,
-    onlyUrls: primary.onlyUrls.length ? primary.onlyUrls : fallback.onlyUrls,
-    role: primary.role || fallback.role,
-    dataSources: primary.dataSources.length ? primary.dataSources : fallback.dataSources,
-  };
 }
 
 async function readSSE(

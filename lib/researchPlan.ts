@@ -11,12 +11,16 @@ export type NeighborhoodFact = {
   facts: string[];
 };
 
+export type FacetId = "jobs" | "hires" | "product" | "funding" | "timeline" | "donors";
+
 export type ResearchPlan = {
   searchQuery: string;
   queries: string[];
   subjects: string[];
   allowNewEntities: boolean;
   gaps: string[];
+  facets: FacetId[];
+  jurisdictions: string[];
 };
 
 const MAX_FOCUS = 3;
@@ -47,35 +51,63 @@ const SKIP_FOCUS = new Set([
   "why",
 ]);
 
-type FacetId = "jobs" | "hires" | "product" | "funding" | "timeline";
+const FACET_IDS = new Set<FacetId>(["jobs", "hires", "product", "funding", "timeline", "donors"]);
 
-const FACETS: { id: FacetId; test: RegExp; gap: (subject: string) => string }[] = [
+const FACETS: {
+  id: FacetId;
+  test: RegExp;
+  gap: (subject: string) => string;
+  keywords: string[];
+}[] = [
   {
     id: "timeline",
     test: /\b(timeline|history|career|lived|founded|acquired|biography|background|born)\b/i,
     gap: (subject) => `when ${subject} lived, founded companies, or was acquired`,
+    keywords: ["biography", "timeline", "founded", "born", "career"],
   },
   {
     id: "jobs",
     test: /\b(job postings?|jobs|hiring|careers?|openings?|recruit)/i,
     gap: (subject) => `open roles and job postings at ${subject}`,
+    keywords: ["jobs", "hiring", "careers", "openings"],
   },
   {
     id: "hires",
     test: /\b(recent hires?|hired|joined|appointment|new (cmo|cto|ceo|head|vp))\b/i,
     gap: (subject) => `recent hires and leadership changes at ${subject}`,
+    keywords: ["hired", "joined", "appointment", "leadership"],
   },
   {
     id: "product",
     test: /\b(building next|roadmap|what are they building|product|shipping|launching)\b/i,
     gap: (subject) => `what ${subject} is building next`,
+    keywords: ["product", "roadmap", "launch"],
   },
   {
     id: "funding",
     test: /\b(raised|funding|investors?|series [a-d]|valuation)\b/i,
     gap: (subject) => `funding and investors for ${subject}`,
+    keywords: ["funding", "investors", "valuation", "raised"],
+  },
+  {
+    id: "donors",
+    test: /\b(donors?|donations?|donated|fundraising|who funds|campaign finance|register of interests)\b/i,
+    gap: (subject) => `donors, donations, gifts, and fundraising for ${subject}`,
+    keywords: [
+      "donor",
+      "donors",
+      "donation",
+      "donations",
+      "donated",
+      "fundraising",
+      "register of interests",
+      "electoral commission",
+    ],
   },
 ];
+
+const DONOR_REL_TYPES = new Set(["donated_to", "funds", "funded_by"]);
+const DONOR_CLAIM = /\b(donat|donor|fundraising|gift|hospitality|register of interests)\b/i;
 
 export function buildNeighborhood(
   question: string,
@@ -148,6 +180,18 @@ export function extractFocusSubjects(question: string): string[] {
   );
   if (product) add(product[1]);
 
+  const donorName = question.match(
+    /(?:^|\s)((?:[A-Za-z][A-Za-z'’.-]+\s+){1,3}[A-Za-z][A-Za-z'’.-]+?)(?:['’]s|s)\s+(?:political\s+)?donors?\b/i,
+  );
+  if (donorName) {
+    const tokens = donorName[1]
+      .replace(/s$/i, "")
+      .trim()
+      .split(/\s+/)
+      .filter((token) => !SKIP_FOCUS.has(token.toLowerCase()) && token.toLowerCase() !== "is");
+    if (tokens.length >= 2) add(titleCaseName(tokens.join(" ")));
+  }
+
   return found.slice(0, 5);
 }
 
@@ -157,10 +201,78 @@ export function detectFacets(question: string): FacetId[] {
 
 export function isComplexQuestion(question: string): boolean {
   const facets = detectFacets(question);
+  if (facets.includes("donors")) return true;
   if (facets.length >= 2) return true;
   if (question.trim().length > 140) return true;
   if ((question.match(/[.?!]/g) ?? []).length >= 2) return true;
   return false;
+}
+
+export function facetKeywords(facets: FacetId[]): string[] {
+  return uniqueNames(
+    FACETS.filter((facet) => facets.includes(facet.id)).flatMap((facet) => facet.keywords),
+  );
+}
+
+export function detectJurisdictions(question: string, extra: string[] = []): string[] {
+  const hay = [question, ...extra].join(" ");
+  const hits: string[] = [];
+  if (
+    /\b(northern ireland|belfast|stormont|sinn f[eé]in|mla\b|ni assembly|mid ulster|dungannon|clonoe)\b/i.test(
+      hay,
+    )
+  ) {
+    hits.push("NI");
+  }
+  if (/\b(westminster|house of commons|uk parliament|electoral commission|united kingdom)\b/i.test(hay)) {
+    hits.push("GB");
+  }
+  if (/\b(congress|fec\b|opensecrets|united states|u\.s\. senate|house of representatives)\b/i.test(hay)) {
+    hits.push("US");
+  }
+  if (/\b(oireachtas|d[aá]il|dublin|republic of ireland)\b/i.test(hay)) hits.push("IE");
+  if (/\b(european parliament|mep\b|brussels|eu transparency)\b/i.test(hay)) hits.push("EU");
+  return uniqueNames(hits);
+}
+
+export function jurisdictionsFromEntities(entities: Entity[]): string[] {
+  const hits: string[] = [];
+  for (const entity of entities) {
+    const code = (entity.jurisdiction ?? "").toUpperCase();
+    if (code === "US" || code === "GB" || code === "IE" || code === "EU" || code === "NI") {
+      hits.push(code);
+    }
+    hits.push(...detectJurisdictions(entity.name));
+  }
+  return uniqueNames(hits);
+}
+
+export function relationshipsSatisfyFacets(
+  relationships: Array<{ type: string; claim: string; category?: string }>,
+  facets: FacetId[],
+): boolean {
+  if (facets.length === 0) return true;
+  return facets.every((facet) => relationships.some((rel) => relationshipMatchesFacet(rel, facet)));
+}
+
+export function facetRetryQueries(plan: ResearchPlan): string[] {
+  const focus = plan.subjects[0];
+  if (!focus) return plan.queries;
+  const quoted = `"${focus}"`;
+  if (!plan.facets.includes("donors")) return plan.queries;
+  const party = plan.subjects.find((name) =>
+    /\b(sinn|party|f[eé]in|fein|labour|conservative|dup|alliance|uup|sdlp)\b/i.test(name),
+  );
+  return uniqueNames(
+    [
+      `${quoted} "register of interests" donations`,
+      `${quoted} "Electoral Commission" donations`,
+      `${quoted} "Northern Ireland Assembly" donations gifts`,
+      party
+        ? `"${party}" donations Electoral Commission`
+        : `${quoted} party donations Electoral Commission`,
+    ].map((query) => query.slice(0, QUERY_LIMIT)),
+  );
 }
 
 export function heuristicResearchPlan(
@@ -179,14 +291,21 @@ export function heuristicResearchPlan(
 
   const queries = buildResearchQueries(question, subjects);
   const allowNewEntities = !isConnectQuestion(question);
+  const facets = detectFacets(question);
   const gaps = gapsFromQuestion(question, focus || subjects[0] || "this subject");
+  const jurisdictions = detectJurisdictions(question, [
+    ...subjects,
+    ...neighborhood.map((item) => item.name),
+  ]);
 
   return {
-    searchQuery: queries[0],
-    queries,
+    searchQuery: queries[0] || strategicSearchQuery(question),
+    queries: queries.length ? queries : [strategicSearchQuery(question)],
     subjects,
     allowNewEntities,
     gaps,
+    facets,
+    jurisdictions,
   };
 }
 
@@ -196,6 +315,17 @@ export function buildResearchQueries(question: string, subjects: string[]): stri
   if (!focus) return [strategicSearchQuery(question)];
 
   const quoted = `"${focus}"`;
+  const facets = detectFacets(question);
+  if (facets.includes("donors")) {
+    return uniqueNames(
+      [
+        `${quoted} political donors`,
+        `${quoted} campaign donations`,
+        `${quoted} register of interests donations`,
+        `${quoted} Electoral Commission donations`,
+      ].map((query) => query.slice(0, QUERY_LIMIT)),
+    ).slice(0, MAX_QUERIES);
+  }
   if (!isComplexQuestion(question)) {
     const compact = strategicSearchQuery(question);
     if (/\bbiograph/i.test(compact) || isHistoryQuestion(question)) {
@@ -204,7 +334,6 @@ export function buildResearchQueries(question: string, subjects: string[]): stri
     return [quoted.slice(0, QUERY_LIMIT)];
   }
 
-  const facets = detectFacets(question);
   const queries =
     facets.includes("timeline") || isHistoryQuestion(question)
       ? [`${quoted} founded lived acquired dates`]
@@ -226,6 +355,9 @@ export function buildResearchQueries(question: string, subjects: string[]): stri
   if (facets.includes("funding")) {
     queries.push(`${quoted} funding investors`);
   }
+  if (facets.includes("donors")) {
+    queries.push(`${quoted} political donors`);
+  }
 
   return uniqueNames(queries.map((query) => query.trim().slice(0, QUERY_LIMIT))).slice(
     0,
@@ -235,16 +367,22 @@ export function buildResearchQueries(question: string, subjects: string[]): stri
 
 function gapsFromQuestion(question: string, subject: string): string[] {
   const facets = detectFacets(question);
-  const gaps = [
-    `when ${subject} lived, founded companies, or was acquired`,
-    ...FACETS.filter((facet) => facets.includes(facet.id)).map((facet) =>
-      facet.gap(subject),
-    ),
-  ];
-  if (/personal|famil|born|educat|school|spouse/i.test(question)) {
+  const gaps = FACETS.filter((facet) => facets.includes(facet.id)).map((facet) =>
+    facet.gap(subject),
+  );
+  if (facets.includes("timeline") || (isHistoryQuestion(question) && !facets.includes("donors"))) {
+    if (!gaps.some((gap) => /lived|founded/.test(gap))) {
+      gaps.unshift(`when ${subject} lived, founded companies, or was acquired`);
+    }
+  }
+  if (/personal|famil|born|educat|school|spouse/i.test(question) && !facets.includes("donors")) {
     gaps.push("personal life", "education", "family");
   }
-  if (/career|role|minister|background|histor/i.test(question) && !facets.includes("hires")) {
+  if (
+    /career|role|minister|background|histor/i.test(question) &&
+    !facets.includes("hires") &&
+    !facets.includes("donors")
+  ) {
     gaps.push("career history", "other roles");
   }
   if (/how |what (does|is|are)|work|operat/i.test(question) && gaps.length === 0) {
@@ -280,6 +418,48 @@ function uniqueNames(values: string[]): string[] {
   return out;
 }
 
+function uniqueFacets(values: FacetId[]): FacetId[] {
+  const seen = new Set<FacetId>();
+  const out: FacetId[] = [];
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+function relationshipMatchesFacet(
+  rel: { type: string; claim: string; category?: string },
+  facet: FacetId,
+): boolean {
+  if (facet === "donors") {
+    if (DONOR_REL_TYPES.has(rel.type)) return true;
+    if (rel.type === "declared_interest") {
+      const hay = `${rel.category ?? ""} ${rel.claim}`;
+      return DONOR_CLAIM.test(hay);
+    }
+    return DONOR_CLAIM.test(rel.claim);
+  }
+  if (facet === "funding") {
+    return (
+      ["funds", "funded_by", "invested_in", "investor_in"].includes(rel.type) ||
+      /\b(investor|funding|raised)\b/i.test(rel.claim)
+    );
+  }
+  const keywords = FACETS.find((item) => item.id === facet)?.keywords ?? [];
+  const hay = `${rel.type} ${rel.claim}`.toLowerCase();
+  return keywords.some((keyword) => hay.includes(keyword.toLowerCase()));
+}
+
+function titleCaseName(value: string): string {
+  return value
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
 export async function planResearch(
   question: string,
   neighborhood: NeighborhoodFact[],
@@ -294,21 +474,22 @@ export async function planResearch(
   const system = extending
     ? `Plan 1–3 web searches to fill gaps in an existing knowledge graph.
 Return JSON only:
-{"subjects":["Name"],"queries":["\\"Name\\" facet"],"allowNewEntities":true,"gaps":["facet"]}
+{"subjects":["Name"],"queries":["\\"Name\\" facet"],"allowNewEntities":true,"gaps":["facet"],"facets":["donors"],"jurisdictions":["NI"]}
 Rules:
 - Each query is a short web query (under 80 chars), not a paragraph. Put the main person/org in quotes.
-- One facet per query. Aim at MISSING facets, including when they lived, founded, or were acquired. Do not dump already-known related names into the query.
+- One facet per query. Aim at MISSING facets. If the question is about donors or donations, search registers and party donations — do not emit a biography query.
 - allowNewEntities is true whenever the question needs anything new on the map.
 - allowNewEntities is false only when the question is solely about linking entities already in the neighborhood.
 - gaps: 1–4 short missing facets for the extractor.
 - Do not answer the question.`
     : `Decompose this research question into 1–4 focused web search queries.
 Return JSON only:
-{"subjects":["Triumph Arcade"],"queries":["\\"Triumph Arcade\\" Rips product"],"allowNewEntities":true,"gaps":["product roadmap"]}
+{"subjects":["Triumph Arcade"],"queries":["\\"Triumph Arcade\\" Rips product"],"allowNewEntities":true,"gaps":["product roadmap"],"facets":["product"],"jurisdictions":[]}
 Rules:
 - subjects are the real-world people, companies, or products the question is about.
 - Each query is under 80 characters. Put the main person/org in quotes.
-- One facet per query (overview, chronology, product, hiring, jobs, funding). Include a chronology query when the subject is a person or company.
+- One facet per query (overview, chronology, product, hiring, jobs, funding, donors). Include a chronology query when the subject is a person or company unless the question is about donors, donations, or fundraising.
+- If the question is about donors or donations, emit donor/register queries only.
 - Never copy the user's paragraph or conversational filler.
 - For multi-part questions, emit a separate query per facet.
 - Do not answer the question.`;
@@ -370,6 +551,8 @@ function parsePlan(
       subjects?: unknown;
       allowNewEntities?: boolean;
       gaps?: unknown;
+      facets?: unknown;
+      jurisdictions?: unknown;
     };
     const listed = Array.isArray(rec.queries)
       ? rec.queries.map((query) => String(query).trim()).filter(Boolean)
@@ -386,14 +569,29 @@ function parsePlan(
     const gaps = Array.isArray(rec.gaps)
       ? rec.gaps.map((gap) => String(gap).trim()).filter(Boolean).slice(0, 4)
       : fallback.gaps;
+    const parsedFacets = Array.isArray(rec.facets)
+      ? rec.facets
+          .map((item) => String(item).trim().toLowerCase())
+          .filter((item): item is FacetId => FACET_IDS.has(item as FacetId))
+      : [];
+    const parsedJurisdictions = Array.isArray(rec.jurisdictions)
+      ? rec.jurisdictions.map((item) => String(item).trim().toUpperCase()).filter(Boolean)
+      : [];
+    const resolvedSubjects = subjects.length ? subjects : fallback.subjects;
     return {
       searchQuery: queries[0],
       queries,
-      subjects: subjects.length ? subjects : fallback.subjects,
+      subjects: resolvedSubjects,
       allowNewEntities: isConnectQuestion(question)
         ? rec.allowNewEntities === true
         : true,
       gaps: gaps.length ? gaps : fallback.gaps,
+      facets: uniqueFacets([...detectFacets(question), ...parsedFacets, ...fallback.facets]),
+      jurisdictions: uniqueNames([
+        ...detectJurisdictions(question, resolvedSubjects),
+        ...parsedJurisdictions,
+        ...fallback.jurisdictions,
+      ]),
     };
   } catch {
     return null;

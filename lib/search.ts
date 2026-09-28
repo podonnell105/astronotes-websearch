@@ -153,6 +153,7 @@ const BIO_INTENT =
 /** Compact the question and, for bio/involvement asks, bias Tavily toward encyclopedic hits. */
 export function strategicSearchQuery(question: string): string {
   const compact = compactSearchQuery(question);
+  if (/\b(donors?|donations?|fundraising)\b/i.test(question)) return compact;
   if (!BIO_INTENT.test(question)) return compact;
   if (/\bbiograph/i.test(compact)) return compact;
   const tokens = compact.split(/\s+/).filter(Boolean);
@@ -675,15 +676,13 @@ function rememberPageText(url: string, text: string) {
   if (clipped.length > MIN_PAGE_CHARS) pageTextCache.set(url, clipped);
 }
 
-export async function fetchRelevantPages(results: SearchResult[]): Promise<{
+export async function fetchPages(results: SearchResult[]): Promise<{
   documents: Document[];
   failed: SearchResult[];
 }> {
-  const ranked = rankSearchResults(results);
-  const subset = ranked.slice(0, FETCH_COUNT);
   const failed: SearchResult[] = [];
   const pages = await Promise.all(
-    subset.map(async (result) => {
+    results.map(async (result) => {
       const page = await fetchPage(result.url);
       if (!page) {
         failed.push(result);
@@ -696,8 +695,18 @@ export async function fetchRelevantPages(results: SearchResult[]): Promise<{
       };
     }),
   );
+  return { documents: pages, failed };
+}
+
+export async function fetchRelevantPages(results: SearchResult[]): Promise<{
+  documents: Document[];
+  failed: SearchResult[];
+}> {
+  const ranked = rankSearchResults(results);
+  const subset = ranked.slice(0, FETCH_COUNT);
+  const fetched = await fetchPages(subset);
   const remainder = ranked.slice(FETCH_COUNT).map((r) => ({ ...r, text: r.snippet }));
-  return { documents: [...pages, ...remainder], failed };
+  return { documents: [...fetched.documents, ...remainder], failed: fetched.failed };
 }
 
 async function fetchPage(

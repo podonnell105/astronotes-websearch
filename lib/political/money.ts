@@ -12,18 +12,48 @@ import { emptyFragment, mergeFragments } from "./types";
 export async function lookupDonationsAndLobbying(
   input: PoliticalAdapterInput,
 ): Promise<PoliticalFragment> {
-  const parts = await Promise.all([
-    lookupElectoralCommission(input),
-    lookupFec(input),
-    lookupLda(input),
-    lookupEuTransparency(input),
-    lookupLobbyingIe(input),
-  ]);
-  return mergeFragments(parts);
+  const enabled = new Set(input.sources);
+  const want = (id: (typeof input.sources)[number]) => enabled.size === 0 || enabled.has(id);
+  const jurisdiction = (input.subject.person?.jurisdiction ?? "").toUpperCase();
+  const skipUs = jurisdiction === "GB" || jurisdiction === "NI" || jurisdiction === "IE" || jurisdiction === "EU";
+  const parts: Array<Promise<PoliticalFragment>> = [];
+  if (want("electoral_commission")) parts.push(lookupElectoralCommission(input));
+  if (want("openfec") && !skipUs) parts.push(lookupFec(input));
+  if (want("senate_lda") && !skipUs) parts.push(lookupLda(input));
+  if (want("eu_transparency")) parts.push(lookupEuTransparency(input));
+  if (want("lobbying_ie")) parts.push(lookupLobbyingIe(input));
+  if (parts.length === 0) return emptyFragment();
+  return mergeFragments(await Promise.all(parts));
 }
 
 async function lookupElectoralCommission(input: PoliticalAdapterInput): Promise<PoliticalFragment> {
-  const name = input.subject.person?.name || input.subject.names[0] || input.query;
+  const personName = input.subject.person?.name || input.subject.names[0] || input.query;
+  const queries = uniqueNames([
+    personName,
+    ...input.existing
+      .filter((entity) => entity.kind === "organization" || entity.type === "organization")
+      .map((entity) => entity.name)
+      .filter((name) =>
+        /party|sinn|f[eé]in|labour|conservative|dup|alliance|uup|sdlp|green party|reform/i.test(
+          name,
+        ),
+      ),
+    ...input.subject.names.filter((name) =>
+      /party|sinn|f[eé]in|labour|conservative|dup|alliance/i.test(name),
+    ),
+  ]).slice(0, 3);
+
+  const fragments: PoliticalFragment[] = [];
+  for (const name of queries) {
+    fragments.push(await searchElectoralCommission(name, input));
+  }
+  return mergeFragments(fragments);
+}
+
+async function searchElectoralCommission(
+  name: string,
+  input: PoliticalAdapterInput,
+): Promise<PoliticalFragment> {
   const data = await politicalGetJson<{
     Result?: Array<{
       ECRef?: string;
@@ -43,6 +73,7 @@ async function lookupElectoralCommission(input: PoliticalAdapterInput): Promise<
   const relationships = [];
   const sources = [];
   const personId = input.subject.person?.id;
+  const personName = input.subject.person?.name || input.subject.names[0] || "";
   for (const row of rows.slice(0, 8)) {
     const rec = row as Record<string, string | undefined>;
     const donor = String(rec.DonorName ?? rec.donorName ?? "").trim();
@@ -67,9 +98,9 @@ async function lookupElectoralCommission(input: PoliticalAdapterInput): Promise<
     const value = rec.Value ?? rec.value ?? "";
     const date = rec.AcceptedDate ?? rec.acceptedDate;
     const snippet = `${donor} donated ${value || "an amount"} to ${entityName}${date ? ` (accepted ${date})` : ""}.`;
-    const targetId = personId && entityName.toLowerCase().includes(name.toLowerCase().split(" ").slice(-1)[0] || "")
-      ? personId
-      : recipient.id;
+    const last = personName.toLowerCase().split(" ").slice(-1)[0] || "";
+    const targetId =
+      personId && last && entityName.toLowerCase().includes(last) ? personId : recipient.id;
     relationships.push(
       recordedRelationship({
         source: donorEntity.id,
@@ -90,6 +121,20 @@ async function lookupElectoralCommission(input: PoliticalAdapterInput): Promise<
     sources.push(sourceFromProvenance(`Donation ${rec.ECRef || donor}`, url, snippet, "electoralcommission.org.uk", date));
   }
   return { entities, relationships, sources, skipped: [] };
+}
+
+function uniqueNames(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const name = value.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
 }
 
 async function lookupFec(input: PoliticalAdapterInput): Promise<PoliticalFragment> {

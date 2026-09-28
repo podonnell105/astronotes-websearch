@@ -1,18 +1,16 @@
 "use client";
 
-import type { ResearchEvent, SearchResult } from "@/lib/types";
+import type { ResearchEvent } from "@/lib/types";
 import { useEffect, useRef } from "react";
 
 export function ResearchFeed({
   events,
   stats,
-  sources,
   collapsed = false,
   onToggle,
 }: {
   events: Extract<ResearchEvent, { type: "log" }>[];
   stats: { sources: number; entities: number; relationships: number };
-  sources: SearchResult[];
   collapsed?: boolean;
   onToggle?: () => void;
 }) {
@@ -84,37 +82,18 @@ export function ResearchFeed({
           )}
         </div>
       </div>
-      <div className="flex min-h-0 flex-1">
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
-          {events.map((event, index) => (
-            <div
-              key={`${event.timestamp}-${index}`}
-              className="flex gap-3 py-0.5 font-mono text-[11px] leading-5"
-              style={{ animation: "feed-in 220ms ease-out" }}
-            >
-              <span className="shrink-0 text-dim">{event.timestamp}</span>
-              <span className="text-muted">{event.message}</span>
-            </div>
-          ))}
-          <div ref={endRef} />
-        </div>
-        <div className="w-[240px] shrink-0 overflow-y-auto border-l border-line px-3 py-2">
-          <div className="label mb-2">Sources</div>
-          <ul className="space-y-1.5">
-            {sources.map((source) => (
-              <li key={source.url}>
-                <a
-                  href={source.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block truncate font-mono text-[11px] text-muted hover:text-ink"
-                >
-                  {source.source || source.title}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
+        {events.map((event, index) => (
+          <div
+            key={`${event.timestamp}-${index}`}
+            className="flex gap-3 py-0.5 font-mono text-[11px] leading-5"
+            style={{ animation: "feed-in 220ms ease-out" }}
+          >
+            <span className="shrink-0 text-dim">{event.timestamp}</span>
+            <span className="text-muted">{event.message}</span>
+          </div>
+        ))}
+        <div ref={endRef} />
       </div>
     </section>
   );

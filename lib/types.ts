@@ -420,9 +420,3 @@ export type AuthUser = {
   email: string;
   credits: number;
 };
-
-export type QueryTemplate = {
-  id: "landscape" | "counterparty" | "audit";
-  label: string;
-  query: string;
-};

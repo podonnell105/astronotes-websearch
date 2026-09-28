@@ -7,6 +7,7 @@ import {
   evidenceExcerpt,
   extractKnowledge,
   groundRelationships,
+  mergeExtractions,
   recitesBetterEvidence,
   type Extraction,
 } from "./extraction";
@@ -16,17 +17,26 @@ import { classifyClaims, toValidation } from "./jev";
 import { fetchPrimaryRecords, harvestOrgNames } from "./primarySources";
 import { isPoliticalRun, runPoliticalIngest, applyPoliticalFragment } from "./political/run";
 import { linkPoliticalGraph } from "./political/link";
-import { filterRelevantResults } from "./relevance";
+import { filterRelevantResults, MIN_SCRAPE_SCORE, scoreResults } from "./relevance";
 import {
-  fetchRelevantPages,
+  fetchPages,
   mergeSearchOutcomes,
   nameOnlySearchQuery,
   rankKnownEntities,
   searchWeb,
   type Document,
 } from "./search";
+import { inferQueryPolicy, inferredSourceLabel } from "./queryPolicy";
 import { emptySourcePolicy, hostIsDenied, mergeDropped, normalizeSourcePolicy, summarizeDropped } from "./sources";
-import { buildNeighborhood, planResearch } from "./researchPlan";
+import { answerCoverage, MAX_ANSWER_TRIES, PAGES_PER_TRY } from "./coverage";
+import {
+  buildNeighborhood,
+  facetKeywords,
+  facetRetryQueries,
+  jurisdictionsFromEntities,
+  planResearch,
+  type ResearchPlan,
+} from "./researchPlan";
 import {
   createSession,
   getSession,
@@ -35,6 +45,7 @@ import {
   resumeSession,
   type SessionRecord,
 } from "./store";
+import type { DataSourceId } from "./dataCatalog";
 import type { DroppedSource, Emit, Entity, Relationship, SearchResult, SourcePolicy } from "./types";
 
 function sleep(ms: number) {
@@ -82,10 +93,13 @@ export async function runResearch(
     session.sourcePolicy = incomingPolicy;
     await persistSession(session);
   }
+  session.sourcePolicy = inferQueryPolicy(nextQuery, session.sourcePolicy);
+  await persistSession(session);
   const policy = session.sourcePolicy;
   const extending = Boolean(sessionId);
   const preferExistingLinks = Boolean(options?.preferExistingLinks && extending);
   const stagger = runtime.mode === "demo" ? 140 : 0;
+  let ranPolitical = isPoliticalRun(policy);
 
   const sessionEvent = { type: "session" as const, sessionId: session.id };
   rememberEvent(session, sessionEvent);
@@ -99,6 +113,7 @@ export async function runResearch(
   };
   rememberEvent(session, modeEvent);
   emit(modeEvent);
+  log(emit, session, `Choosing ${inferredSourceLabel(policy)} sources from the query`);
 
   try {
     let existingEntities = [...session.entities.values()];
@@ -125,6 +140,7 @@ export async function runResearch(
         emit(event);
       };
       applyPoliticalFragment(session, fragment, politicalEmit);
+      ranPolitical = true;
       log(
         emit,
         session,
@@ -189,19 +205,44 @@ export async function runResearch(
       await Promise.all(searchQueries.map((query) => runSearch(query))),
     );
     recordDropped(session, emit, dropped);
-    const relevant = filterRelevantResults(results, subjects);
-    if (relevant.dropped.length > 0 && relevant.results.length > 0) {
+    const relevant = filterRelevantResults(
+      results,
+      relevanceFilter(plan, existingEntities),
+    );
+    if (relevant.dropped.length > 0) {
       recordDropped(session, emit, relevant.dropped);
-      results = relevant.results;
-      log(emit, session, `Kept ${results.length} sources about ${subjects[0] || "the subject"}`);
+      if (relevant.results.length > 0) {
+        results = relevant.results;
+        log(emit, session, `Kept ${results.length} sources about ${subjects[0] || "the subject"}`);
+      } else if (plan.facets.length > 0) {
+        results = [];
+        log(emit, session, `Dropped sources that were not about ${plan.facets.join(", ")}`);
+      }
     }
     if (results.length === 0 && !extending && !policy.onlyUrls.length) {
-      log(emit, session, "No sources — broadening search");
-      const fallbackQuery = subjects[0]
-        ? `"${subjects[0]}"`
-        : nameOnlySearchQuery(nextQuery);
-      ({ results, provider, dropped, recovered } = await runSearch(fallbackQuery, true));
+      if (plan.facets.includes("donors")) {
+        log(emit, session, "No donor sources — searching registers");
+        const retryQueries = facetRetryQueries(plan);
+        for (const query of retryQueries) log(emit, session, `Searching for: ${query}`);
+        ({ results, provider, dropped, recovered } = mergeSearchOutcomes(
+          await Promise.all(retryQueries.map((query) => runSearch(query))),
+        ));
+      } else {
+        log(emit, session, "No sources — broadening search");
+        const fallbackQuery = subjects[0]
+          ? `"${subjects[0]}"`
+          : nameOnlySearchQuery(nextQuery);
+        ({ results, provider, dropped, recovered } = await runSearch(fallbackQuery, true));
+      }
       recordDropped(session, emit, dropped);
+      const retryRelevant = filterRelevantResults(
+        results,
+        relevanceFilter(plan, existingEntities),
+      );
+      if (retryRelevant.dropped.length > 0 && retryRelevant.results.length > 0) {
+        recordDropped(session, emit, retryRelevant.dropped);
+        results = retryRelevant.results;
+      }
     }
     if (recovered) {
       log(emit, session, "Few sources — merged OpenAI web search");
@@ -231,24 +272,35 @@ export async function runResearch(
 
     if (wantPrimary) log(emit, session, "Looking up structured records...");
 
-    if (results.length === 0 && !wantPrimary) {
+    if (results.length === 0 && !wantPrimary && runtime.search === "mock") {
       log(emit, session, "No new sources to add");
       stats(emit, session);
       return complete(session, emit);
     }
 
-    log(emit, session, "Reading relevant pages...");
     let documents: Document[] = [];
+    let extracted: Extraction = { entities: [], relationships: [] };
+
     if (runtime.search === "mock") {
+      log(emit, session, "Reading relevant pages...");
       documents = results.map((result) => ({ ...result, text: result.snippet }));
       await addSources(session, emit, documents, stagger);
+      log(emit, session, `Found ${session.sources.length} sources`);
+      log(emit, session, "Extracting entities and claims...");
+      extracted = await extractFromDocuments(
+        nextQuery,
+        documents,
+        existingEntities,
+        existingRelationships,
+        {
+          preferExistingLinks: extending && !allowNewEntities,
+          allowNewEntities: extending ? allowNewEntities : undefined,
+          gaps,
+          subjects,
+        },
+      );
     } else {
-      const [primary, fetched] = await Promise.all([
-        primaryPromise,
-        results.length > 0
-          ? fetchRelevantPages(results)
-          : Promise.resolve({ documents: [] as Document[], failed: [] }),
-      ]);
+      const primary = await primaryPromise;
       recordDropped(session, emit, primary.dropped);
       for (const message of primary.skipped) log(emit, session, message);
       primaryDocs = primary.documents;
@@ -260,83 +312,139 @@ export async function runResearch(
           `Attached ${primaryDocs.length} primary records (${hosts.join(" / ") || "catalog"})`,
         );
       }
-      recordFailedFetches(session, emit, fetched.failed);
-      const webDocs = usableDocuments(fetched.documents, fetched.failed);
       await addSources(session, emit, primaryDocs, stagger);
-      await addSources(session, emit, webDocs, stagger);
-      documents = [...primaryDocs, ...webDocs];
+      documents = [...primaryDocs];
+
+      let pool = results;
+      const fetchedUrls = new Set(session.sources.map((source) => source.url));
+
+      for (let attempt = 1; attempt <= MAX_ANSWER_TRIES; attempt++) {
+        existingEntities = [...session.entities.values()];
+        existingRelationships = [...session.relationships.values()];
+        let coverage = answerCoverage({
+          query: nextQuery,
+          plan,
+          entities: [...existingEntities, ...extracted.entities],
+          relationships: [...existingRelationships, ...extracted.relationships],
+        });
+        log(
+          emit,
+          session,
+          `Try ${attempt}/${MAX_ANSWER_TRIES} for ${coverage.person} — coverage ${coverage.score}/10`,
+        );
+
+        if (coverage.answered) {
+          log(emit, session, `Answered for ${coverage.person}`);
+          break;
+        }
+
+        if (plan.facets.includes("donors") && !ranPolitical) {
+          await applyDonorRegisters(session, emit, nextQuery, policy, [
+            ...existingEntities,
+            ...extracted.entities,
+          ]);
+          ranPolitical = true;
+          existingEntities = [...session.entities.values()];
+          existingRelationships = [...session.relationships.values()];
+          coverage = answerCoverage({
+            query: nextQuery,
+            plan,
+            entities: [...existingEntities, ...extracted.entities],
+            relationships: [...existingRelationships, ...extracted.relationships],
+          });
+          log(
+            emit,
+            session,
+            `Try ${attempt}/${MAX_ANSWER_TRIES} for ${coverage.person} — coverage ${coverage.score}/10 after registers`,
+          );
+          if (coverage.answered) {
+            log(emit, session, `Answered for ${coverage.person}`);
+            break;
+          }
+        }
+
+        const filter = relevanceFilter(plan, [...existingEntities, ...extracted.entities]);
+        let batch = scoreResults(pool, filter)
+          .filter((item) => item.score >= MIN_SCRAPE_SCORE && !fetchedUrls.has(item.url))
+          .slice(0, PAGES_PER_TRY);
+
+        if (batch.length === 0 && !extending && !policy.onlyUrls.length) {
+          log(
+            emit,
+            session,
+            `No pages above ${MIN_SCRAPE_SCORE - 1} for ${coverage.person} — searching again`,
+          );
+          const retryQueries = plan.facets.includes("donors")
+            ? facetRetryQueries(plan)
+            : [subjects[0] ? `"${subjects[0]}"` : nameOnlySearchQuery(nextQuery)];
+          for (const query of retryQueries) log(emit, session, `Searching for: ${query}`);
+          const more = mergeSearchOutcomes(
+            await Promise.all(
+              retryQueries.map((query) => runSearch(query, !plan.facets.includes("donors"))),
+            ),
+          );
+          recordDropped(session, emit, more.dropped);
+          const extraRelevant = filterRelevantResults(more.results, filter);
+          if (extraRelevant.dropped.length > 0) {
+            recordDropped(session, emit, extraRelevant.dropped);
+          }
+          pool = mergeUniqueResults(pool, extraRelevant.results);
+          batch = scoreResults(pool, filter)
+            .filter((item) => item.score >= MIN_SCRAPE_SCORE && !fetchedUrls.has(item.url))
+            .slice(0, PAGES_PER_TRY);
+        }
+
+        if (batch.length === 0) {
+          if (attempt === MAX_ANSWER_TRIES) {
+            log(
+              emit,
+              session,
+              `Still unanswered for ${coverage.person} after ${MAX_ANSWER_TRIES} tries (${coverage.missing})`,
+            );
+          }
+          continue;
+        }
+
+        log(
+          emit,
+          session,
+          `Scraping ${batch.length} pages about ${coverage.person} (score > ${MIN_SCRAPE_SCORE - 1})`,
+        );
+        for (const item of batch) {
+          log(emit, session, `  ${item.score}/10 ${item.title}`);
+          fetchedUrls.add(item.url);
+        }
+
+        const fetched = await fetchPages(batch);
+        recordFailedFetches(session, emit, fetched.failed);
+        const webDocs = usableDocuments(fetched.documents, fetched.failed);
+        await addSources(session, emit, webDocs, stagger);
+        documents = [...documents, ...webDocs];
+        log(emit, session, `Found ${session.sources.length} sources`);
+        log(emit, session, "Extracting entities and claims...");
+        const nextExtract = await extractFromDocuments(
+          nextQuery,
+          webDocs,
+          [...existingEntities, ...extracted.entities],
+          [...existingRelationships, ...extracted.relationships],
+          {
+            preferExistingLinks: extending && !allowNewEntities,
+            allowNewEntities: extending ? allowNewEntities : true,
+            gaps,
+            subjects,
+          },
+          (message) => log(emit, session, message),
+        );
+        extracted = mergeExtractions([extracted, nextExtract]);
+      }
     }
 
-    if (results.length === 0 && primaryDocs.length === 0) {
-      log(emit, session, "No new sources to add");
-      stats(emit, session);
-      return complete(session, emit);
-    }
-
-    log(emit, session, `Found ${session.sources.length} sources`);
-
-    log(emit, session, "Extracting entities and claims...");
-    let extracted = await extractFromDocuments(
-      nextQuery,
-      documents,
-      existingEntities,
-      existingRelationships,
-      {
-        preferExistingLinks: extending && !allowNewEntities,
-        allowNewEntities: extending ? allowNewEntities : undefined,
-        gaps,
-        subjects,
-      },
-      runtime.search !== "mock" ? (message) => log(emit, session, message) : undefined,
-    );
     if (extending && existingEntities.length > 0) {
       extracted = attachNewEntities(
         extracted,
         rankExisting(nextQuery, existingEntities),
         documents,
       );
-    }
-
-    if (
-      !extending &&
-      extracted.relationships.length === 0 &&
-      runtime.search !== "mock"
-    ) {
-      log(emit, session, "No claims from first sources — broadening search");
-      const more = await runSearch(
-        subjects[0] ? `"${subjects[0]}"` : nameOnlySearchQuery(nextQuery),
-        true,
-      );
-      recordDropped(session, emit, more.dropped);
-      if (more.recovered) {
-        log(emit, session, "Few sources — merged OpenAI web search");
-      }
-      if (more.results.length > 0) {
-        const extraRelevant = filterRelevantResults(more.results, subjects);
-        if (extraRelevant.dropped.length > 0 && extraRelevant.results.length > 0) {
-          recordDropped(session, emit, extraRelevant.dropped);
-          more.results = extraRelevant.results;
-        }
-        const extra = await fetchRelevantPages(more.results);
-        recordFailedFetches(session, emit, extra.failed);
-        const extraDocs = usableDocuments(extra.documents, extra.failed);
-        await addSources(session, emit, extraDocs, stagger);
-        log(emit, session, `Found ${extraDocs.length} sources`);
-        documents = [...documents, ...extraDocs];
-        extracted = await extractFromDocuments(
-          nextQuery,
-          documents,
-          existingEntities,
-          existingRelationships,
-          {
-            preferExistingLinks: false,
-            allowNewEntities: true,
-            gaps,
-            subjects,
-          },
-          (message) => log(emit, session, message),
-        );
-      }
     }
     log(emit, session, `Extracted ${extracted.entities.length} candidate entities`);
 
@@ -405,6 +513,20 @@ export async function runResearch(
       if (stagger) await sleep(Math.max(40, stagger - 40));
     }
     stats(emit, session);
+
+    const settled = answerCoverage({
+      query: nextQuery,
+      plan,
+      entities: [...session.entities.values()],
+      relationships: [...session.relationships.values()],
+    });
+    if (!settled.answered) {
+      log(
+        emit,
+        session,
+        `Coverage ${settled.score}/10 for ${settled.person} — ${settled.missing}`,
+      );
+    }
 
     if (uniqueRels.length === 0) {
       log(emit, session, extending ? "No new claims to add" : "Graph updated");
@@ -744,5 +866,69 @@ function dedupeRelationships(rels: Relationship[]): Relationship[] {
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+function relevanceFilter(plan: ResearchPlan, entities: Entity[]) {
+  return {
+    subjects: plan.subjects,
+    facetKeywords: facetKeywords(plan.facets),
+    jurisdictions: [
+      ...plan.jurisdictions,
+      ...jurisdictionsFromEntities(entities),
+    ],
+  };
+}
+
+function donorRegisterSources(existing: DataSourceId[]): DataSourceId[] {
+  const extra: DataSourceId[] = ["ni_assembly", "electoral_commission"];
+  const seen = new Set<DataSourceId>();
+  const out: DataSourceId[] = [];
+  for (const id of [...existing, ...extra]) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+async function applyDonorRegisters(
+  session: SessionRecord,
+  emit: Emit,
+  query: string,
+  policy: SourcePolicy,
+  existing: Entity[],
+) {
+  log(emit, session, "Asked donor facet missing — looking up political registers");
+  const fragment = await runPoliticalIngest({
+    query,
+    policy: {
+      ...policy,
+      dataSources: donorRegisterSources(policy.dataSources),
+    },
+    existing,
+  });
+  for (const message of fragment.skipped) log(emit, session, message);
+  const politicalEmit: Emit = (event) => {
+    rememberEvent(session, event);
+    emit(event);
+  };
+  applyPoliticalFragment(session, fragment, politicalEmit);
+  log(
+    emit,
+    session,
+    `Recorded ${fragment.relationships.filter((rel) => rel.basis === "recorded").length} register facts · ${fragment.relationships.filter((rel) => rel.basis === "inferred").length} possible overlaps`,
+  );
+  stats(emit, session);
+}
+
+function mergeUniqueResults(current: SearchResult[], extra: SearchResult[]): SearchResult[] {
+  const seen = new Set(current.map((item) => item.url));
+  const out = [...current];
+  for (const item of extra) {
+    if (!item.url || seen.has(item.url)) continue;
+    seen.add(item.url);
+    out.push(item);
+  }
   return out;
 }

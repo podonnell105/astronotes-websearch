@@ -10,6 +10,7 @@ import type { Emit, Entity, SourcePolicy } from "../types";
 import { lookupCompanyAssertions } from "./companies";
 import { lookupEuroparl } from "./eu";
 import { lookupOireachtas } from "./ie";
+import { lookupNiAssembly } from "./ni";
 import { lookupDonationsAndLobbying } from "./money";
 import { lookupProcurement } from "./procurement";
 import type { PoliticalAdapterInput, PoliticalFragment, PoliticalSubject } from "./types";
@@ -27,6 +28,7 @@ const POLITICAL_SOURCES = new Set<DataSourceId>([
   "electoral_commission",
   "contracts_finder",
   "oireachtas",
+  "ni_assembly",
   "lobbying_ie",
   "congress_gov",
   "openfec",
@@ -67,13 +69,32 @@ export async function runPoliticalIngest(input: {
   const want = (id: DataSourceId) => enabled.size === 0 || enabled.has(id) || input.policy.role === "political";
 
   const parts: PoliticalFragment[] = [wiki];
-  const tasks: Array<Promise<PoliticalFragment>> = [];
+  const identityTasks: Array<Promise<PoliticalFragment>> = [];
   if (want("uk_parliament") || want("uk_hansard") || want("uk_interests")) {
-    tasks.push(safe("UK Parliament", () => lookupUkParliament(adapterInput)));
+    identityTasks.push(safe("UK Parliament", () => lookupUkParliament(adapterInput)));
   }
-  if (want("oireachtas")) tasks.push(safe("Oireachtas", () => lookupOireachtas(adapterInput)));
-  if (want("congress_gov")) tasks.push(safe("Congress.gov", () => lookupCongress(adapterInput)));
-  if (want("europarl")) tasks.push(safe("European Parliament", () => lookupEuroparl(adapterInput)));
+  if (want("oireachtas")) identityTasks.push(safe("Oireachtas", () => lookupOireachtas(adapterInput)));
+  if (want("ni_assembly")) identityTasks.push(safe("NI Assembly", () => lookupNiAssembly(adapterInput)));
+  if (want("congress_gov")) identityTasks.push(safe("Congress.gov", () => lookupCongress(adapterInput)));
+  if (want("europarl")) identityTasks.push(safe("European Parliament", () => lookupEuroparl(adapterInput)));
+
+  const identity = mergeFragments([...parts, ...(await Promise.all(identityTasks))]);
+  const personAfter =
+    identity.entities.find((entity) => entity.kind === "person") ?? person;
+  const moneyInput: PoliticalAdapterInput = {
+    ...adapterInput,
+    existing: [...input.existing, ...identity.entities],
+    subject: {
+      ...subject,
+      person: personAfter,
+      names: unique(
+        [personAfter?.name, ...subject.names, ...identity.entities.map((entity) => entity.name)].filter(
+          (item): item is string => Boolean(item),
+        ),
+      ),
+    },
+  };
+  const moneyParts: PoliticalFragment[] = [];
   if (
     want("electoral_commission") ||
     want("openfec") ||
@@ -81,10 +102,10 @@ export async function runPoliticalIngest(input: {
     want("eu_transparency") ||
     want("lobbying_ie")
   ) {
-    tasks.push(safe("Donations and lobbying", () => lookupDonationsAndLobbying(adapterInput)));
+    moneyParts.push(await safe("Donations and lobbying", () => lookupDonationsAndLobbying(moneyInput)));
   }
 
-  const first = mergeFragments([...parts, ...(await Promise.all(tasks))]);
+  const first = mergeFragments([identity, ...moneyParts]);
   const companyNames = companyHints(first);
   const companyParts: PoliticalFragment[] = [];
   if (companyNames.length && (want("companies_house") || want("gleif") || input.policy.role === "political")) {

@@ -1,4 +1,3 @@
-import { availableDataSources } from "@/lib/config";
 import { HomeScreen } from "@/components/HomeScreen";
 import { getCurrentUser } from "@/lib/auth";
 import { stripeEnabled } from "@/lib/credits";
@@ -15,7 +14,6 @@ export default async function HomePage() {
       user={user}
       stripeEnabled={stripeEnabled()}
       graphs={await listSessionsForUser(user.id)}
-      availableDataSources={availableDataSources()}
     />
   );
 }
