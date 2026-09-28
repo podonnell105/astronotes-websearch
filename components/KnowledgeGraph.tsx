@@ -31,7 +31,7 @@ import {
   type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type EntityData = {
   name: string;
@@ -201,6 +201,7 @@ function GraphInner({
   const { fitView } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<EntityData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [readyKey, setReadyKey] = useState("");
 
   const neighborhood = useMemo(() => {
     if (!expanded || !selectedEntityId) return null;
@@ -269,31 +270,34 @@ function GraphInner({
         data: lanes.get(edge.id) ?? { sourceShift: 0, targetShift: 0, stepPosition: 0.5 },
       })),
     );
-    const t = window.setTimeout(() => fitView({ padding: 0.24, duration: 320 }), 50);
+    setReadyKey(structureKey);
+    const t = window.setTimeout(() => fitView({ padding: 0.24, duration: 0 }), 50);
     return () => window.clearTimeout(t);
   }, [structureKey, entities, relationships, setNodes, setEdges, fitView]);
 
   useEffect(() => {
     setNodes((current) =>
-      current.map((node) => {
-        const entity = entities.find((e) => e.id === node.id);
-        if (!entity) return node;
-        return {
-          ...node,
-          selected: selectedEntityId === node.id,
-          data: {
-            name: entity.name,
-            entityType: entity.type,
-            dimmed: neighborhood ? !neighborhood.has(node.id) : false,
-            highlighted: selectedEntityId
-              ? false
-              : highlight.has(node.id),
-          },
-        };
-      }),
+      current
+        .filter((node) => entities.some((entity) => entity.id === node.id))
+        .map((node) => {
+          const entity = entities.find((e) => e.id === node.id);
+          if (!entity) return node;
+          return {
+            ...node,
+            selected: selectedEntityId === node.id,
+            data: {
+              name: entity.name,
+              entityType: entity.type,
+              dimmed: neighborhood ? !neighborhood.has(node.id) : false,
+              highlighted: selectedEntityId ? false : highlight.has(node.id),
+            },
+          };
+        }),
     );
     setEdges((current) =>
-      current.map((edge) => {
+      current
+        .filter((edge) => relationships.some((item) => item.id === edge.id))
+        .map((edge) => {
         const validation = validations[edge.id];
         const inNeighborhood =
           !neighborhood ||
@@ -353,6 +357,12 @@ function GraphInner({
     [onEdgesChange],
   );
 
+  const pendingLayout =
+    entities.length > 0 &&
+    (nodes.length === 0 ||
+      (readyKey !== structureKey &&
+        !entities.some((entity) => nodes.some((node) => node.id === entity.id))));
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {chromeOpen && (
@@ -379,7 +389,10 @@ function GraphInner({
           </div>
         </div>
       )}
-      <div className="relative min-h-0 flex-1">
+      <div
+        className="relative min-h-0 flex-1"
+        style={{ visibility: pendingLayout ? "hidden" : "visible" }}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -414,7 +427,7 @@ function GraphInner({
         </ReactFlow>
       </div>
       <TimelineStrip
-        relationships={relationships}
+        relationships={pendingLayout ? [] : relationships}
         selectedRelationshipId={selectedRelationshipId}
         focusedRelationshipIds={focusedRelationshipIds}
         onSelect={onSelectRelationship}
@@ -519,10 +532,11 @@ export function KnowledgeGraph(props: {
   onResetSelection: () => void;
   chromeOpen?: boolean;
   onToggleChrome?: () => void;
+  resetKey?: string | null;
 }) {
   return (
     <div className="h-full min-h-0 w-full">
-      <ReactFlowProvider>
+      <ReactFlowProvider key={props.resetKey ?? "graph"}>
         <GraphInner {...props} />
       </ReactFlowProvider>
     </div>

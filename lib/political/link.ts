@@ -36,7 +36,7 @@ export function linkPoliticalGraph(
     return retargetMoney(rel, subject, party, byId) ?? rel;
   });
 
-  const stitched = stitchToSubject(subject, party, merged.entities, rewritten);
+  const stitched = stitchToSubject(subject, party, merged.entities, rewritten, query);
   const kept = keepSubjectComponent(subject.id, merged.entities, stitched);
   const unique = uniqueGraph(kept.entities, kept.relationships);
   return {
@@ -246,14 +246,21 @@ function stitchToSubject(
   party: Entity | undefined,
   entities: Entity[],
   relationships: Relationship[],
+  query: string,
 ): Relationship[] {
   const extra: Relationship[] = [...relationships];
+  const queryName = personNameFromQuery(query);
   for (const ids of componentIds(entities, relationships)) {
     if (ids.has(subject.id)) continue;
     const members = entities.filter((entity) => ids.has(entity.id));
     const claims = relationships.filter((rel) => ids.has(rel.source) && ids.has(rel.target));
     const text = [...members.map((entity) => entity.name), ...claims.map((rel) => rel.claim)].join(" ");
-    const anchor = party && nameInText(party.name, text) && !nameInText(subject.name, text) ? party : subject;
+    const aboutSubject =
+      nameInText(subject.name, text) || Boolean(queryName && nameInText(queryName, text));
+    const aboutParty = Boolean(party && nameInText(party.name, text));
+    const hasMoney = claims.some((rel) => MONEY.has(rel.type));
+    if (!aboutSubject && !aboutParty && !hasMoney) continue;
+    const anchor = party && aboutParty && !aboutSubject ? party : subject;
     const hub =
       members.find((entity) => isOrganization(entity)) ??
       [...members].sort((a, b) => hubScore(b) - hubScore(a))[0];
