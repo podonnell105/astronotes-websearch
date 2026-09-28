@@ -330,6 +330,11 @@ export type ResearchEvent =
       dropped: DroppedSource[];
     }
   | {
+      type: "graph";
+      entities: Entity[];
+      relationships: Relationship[];
+    }
+  | {
       type: "complete";
       sessionId: string;
     }

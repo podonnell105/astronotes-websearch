@@ -1,4 +1,4 @@
-import { detectRuntime, nowStamp } from "./config";
+import { detectRuntime, isOpenAIAuthError, nowStamp } from "./config";
 import { DEMO_QUERY, DEMO_VALIDATIONS, sourcesForRelationship } from "./demo";
 import { addEvidence, sourcesForClaim } from "./evidence";
 import { remapId, resolveEntities } from "./entities";
@@ -15,6 +15,7 @@ import { mergeEntity } from "./ontology";
 import { classifyClaims, toValidation } from "./jev";
 import { fetchPrimaryRecords, harvestOrgNames } from "./primarySources";
 import { isPoliticalRun, runPoliticalIngest, applyPoliticalFragment } from "./political/run";
+import { linkPoliticalGraph } from "./political/link";
 import { filterRelevantResults } from "./relevance";
 import {
   fetchRelevantPages,
@@ -529,11 +530,50 @@ async function resumeOrThrow(sessionId: string, query: string): Promise<SessionR
 }
 
 function complete(session: SessionRecord, emit: Emit): SessionRecord {
+  if (isPoliticalRun(session.sourcePolicy)) settlePoliticalGraph(session, emit);
   session.status = "complete";
   const event = { type: "complete" as const, sessionId: session.id };
   rememberEvent(session, event);
   emit(event);
   return session;
+}
+
+function settlePoliticalGraph(session: SessionRecord, emit: Emit) {
+  const linked = linkPoliticalGraph(
+    [...session.entities.values()],
+    [...session.relationships.values()],
+    session.query,
+  );
+  session.entities = new Map(linked.entities.map((entity) => [entity.id, entity]));
+  session.relationships = new Map(linked.relationships.map((rel) => [rel.id, rel]));
+  for (const id of [...session.validations.keys()]) {
+    if (!session.relationships.has(id)) session.validations.delete(id);
+  }
+  for (const id of [...session.evidence.keys()]) {
+    if (!session.relationships.has(id)) session.evidence.delete(id);
+  }
+  const graph = {
+    type: "graph" as const,
+    entities: linked.entities,
+    relationships: linked.relationships,
+  };
+  rememberEvent(session, graph);
+  emit(graph);
+  if (linked.subjectName) {
+    const money = linked.relationships.some(
+      (rel) => rel.type === "lobbied_on" || rel.type === "donated_to",
+    );
+    if (money) {
+      log(
+        emit,
+        session,
+        linked.partyName
+          ? `Linked lobbying and donations to ${linked.subjectName} or ${linked.partyName}`
+          : `Linked lobbying and donations to ${linked.subjectName}`,
+      );
+    }
+  }
+  stats(emit, session);
 }
 
 function recordDropped(
@@ -623,39 +663,49 @@ async function extractFromDocuments(
   },
   onGroundedDrop?: (message: string) => void,
 ): Promise<Extraction> {
-  const extracted = await extractKnowledge(query, documents, {
-    existingEntities,
-    existingRelationships: existingRelationships.map((rel) => ({
-      source: rel.source,
-      type: rel.type,
-      target: rel.target,
-    })),
-    preferExistingLinks: context.preferExistingLinks,
-    allowNewEntities: context.allowNewEntities,
-    gaps: context.gaps,
-    subjects: context.subjects,
-  });
-  if (!onGroundedDrop) {
+  try {
+    const extracted = await extractKnowledge(query, documents, {
+      existingEntities,
+      existingRelationships: existingRelationships.map((rel) => ({
+        source: rel.source,
+        type: rel.type,
+        target: rel.target,
+      })),
+      preferExistingLinks: context.preferExistingLinks,
+      allowNewEntities: context.allowNewEntities,
+      gaps: context.gaps,
+      subjects: context.subjects,
+    });
+    if (!onGroundedDrop) {
+      extracted.relationships = recitesBetterEvidence(
+        extracted.relationships,
+        [...existingEntities, ...extracted.entities],
+        documents,
+      );
+      return extracted;
+    }
+    const before = extracted.relationships.length;
+    extracted.relationships = groundRelationships(extracted.relationships, documents);
+    if (extracted.relationships.length < before) {
+      onGroundedDrop(
+        `Dropped ${before - extracted.relationships.length} ungrounded claims`,
+      );
+    }
     extracted.relationships = recitesBetterEvidence(
       extracted.relationships,
       [...existingEntities, ...extracted.entities],
       documents,
     );
     return extracted;
+  } catch (error) {
+    if (isOpenAIAuthError(error) && (existingEntities.length > 0 || existingRelationships.length > 0)) {
+      onGroundedDrop?.(
+        "OpenAI API key expired — skipping news extraction. Register facts are kept. Create a new key at platform.openai.com and set OPENAI_API_KEY on Railway.",
+      );
+      return { entities: [], relationships: [] };
+    }
+    throw error;
   }
-  const before = extracted.relationships.length;
-  extracted.relationships = groundRelationships(extracted.relationships, documents);
-  if (extracted.relationships.length < before) {
-    onGroundedDrop(
-      `Dropped ${before - extracted.relationships.length} ungrounded claims`,
-    );
-  }
-  extracted.relationships = recitesBetterEvidence(
-    extracted.relationships,
-    [...existingEntities, ...extracted.entities],
-    documents,
-  );
-  return extracted;
 }
 
 function rankExisting(query: string, entities: Entity[]): Entity[] {

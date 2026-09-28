@@ -64,6 +64,7 @@ const PERSIST_EVENTS = new Set([
   "validation",
   "evidence",
   "dropped_sources",
+  "graph",
   "complete",
   "error",
 ]);

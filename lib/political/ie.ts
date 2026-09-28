@@ -5,6 +5,7 @@ import {
   sourceFromProvenance,
 } from "../ontology";
 import { politicalGetJson } from "./http";
+import { sameName } from "./names";
 import type { PoliticalAdapterInput, PoliticalFragment } from "./types";
 import { emptyFragment } from "./types";
 
@@ -32,10 +33,7 @@ export async function lookupOireachtas(input: PoliticalAdapterInput): Promise<Po
       ? `https://api.oireachtas.ie/v1/members?member_id=${encodeURIComponent(memberId)}&limit=1`
       : `https://api.oireachtas.ie/v1/members?limit=8&q=${encodeURIComponent(name)}`,
   );
-  const hit =
-    data?.results?.find((row) =>
-      (row.member?.fullName || "").toLowerCase().includes(name.toLowerCase().split(" ").slice(-1)[0] || name),
-    ) ?? data?.results?.[0];
+  const hit = data?.results?.find((row) => sameName(row.member?.fullName || "", name));
   if (!hit?.member?.fullName) return emptyFragment();
 
   const display = hit.member.fullName;

@@ -5,6 +5,7 @@ import {
   sourceFromProvenance,
 } from "../ontology";
 import { politicalGetJson } from "./http";
+import { sameName } from "./names";
 import type { PoliticalAdapterInput, PoliticalFragment } from "./types";
 import { emptyFragment } from "./types";
 
@@ -19,7 +20,7 @@ export async function lookupEuroparl(input: PoliticalAdapterInput): Promise<Poli
     : `https://data.europarl.europa.eu/api/v2/meps?name=${encodeURIComponent(name)}&format=application/ld+json`;
   const data = await politicalGetJson<unknown>(url);
   const rows = asMeps(data);
-  const hit = rows[0];
+  const hit = rows.find((row) => row.label && sameName(row.label, name));
   if (!hit) return emptyFragment();
 
   const display = hit.label || name;

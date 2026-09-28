@@ -5,6 +5,7 @@ import {
   sourceFromProvenance,
 } from "../ontology";
 import { politicalGetJson } from "./http";
+import { sameName } from "./names";
 import type { PoliticalAdapterInput, PoliticalFragment } from "./types";
 import { emptyFragment, mergeFragments } from "./types";
 
@@ -96,8 +97,8 @@ async function lookupFec(input: PoliticalAdapterInput): Promise<PoliticalFragmen
   const name = input.subject.person?.name || input.subject.names[0] || input.query;
   const candidates = await politicalGetJson<{
     results?: Array<{ candidate_id?: string; name?: string; party_full?: string; office_full?: string }>;
-  }>(`https://api.open.fec.gov/v1/candidates/search/?q=${encodeURIComponent(name)}&api_key=${key}&per_page=1`);
-  const candidate = candidates?.results?.[0];
+  }>(`https://api.open.fec.gov/v1/candidates/search/?q=${encodeURIComponent(name)}&api_key=${key}&per_page=5`);
+  const candidate = candidates?.results?.find((row) => row.name && sameName(row.name, name));
   if (!candidate?.candidate_id) return emptyFragment();
   const person = makeEntity({
     name: candidate.name || name,
@@ -195,20 +196,12 @@ async function lookupLda(input: PoliticalAdapterInput): Promise<PoliticalFragmen
     });
     entities.push(org);
     const issue = row.lobbying_activities?.[0]?.general_issue_code || "US federal lobbying";
-    const target = makeEntity({
-      name: issue,
-      type: "legislation",
-      kind: "legislation",
-      jurisdiction: "US",
-      id: `issue-us-${issue}`,
-    });
-    entities.push(target);
     const url = row.url || "https://lda.senate.gov/system/public/";
     const snippet = `${client} is recorded on a Senate LDA filing covering ${issue}.`;
     relationships.push(
       recordedRelationship({
         source: org.id,
-        target: personId || target.id,
+        target: personId || org.id,
         type: "lobbied_on",
         claim: snippet,
         sourceUrl: url,
@@ -235,14 +228,7 @@ async function lookupEuTransparency(input: PoliticalAdapterInput): Promise<Polit
   const entities = [];
   const relationships = [];
   const sources = [];
-  const register = makeEntity({
-    name: "EU Transparency Register",
-    type: "organization",
-    kind: "organization",
-    jurisdiction: "EU",
-    id: "eu-transparency-register",
-  });
-  entities.push(register);
+  const personId = input.subject.person?.id;
   for (const row of rows.slice(0, 5)) {
     const orgName = row.name;
     if (!orgName) continue;
@@ -261,7 +247,7 @@ async function lookupEuTransparency(input: PoliticalAdapterInput): Promise<Polit
     relationships.push(
       recordedRelationship({
         source: org.id,
-        target: register.id,
+        target: personId || org.id,
         type: "lobbied_on",
         claim: snippet,
         sourceUrl: url,

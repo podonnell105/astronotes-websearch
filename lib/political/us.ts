@@ -5,6 +5,7 @@ import {
   sourceFromProvenance,
 } from "../ontology";
 import { politicalGetJson } from "./http";
+import { sameName } from "./names";
 import type { PoliticalAdapterInput, PoliticalFragment } from "./types";
 import { emptyFragment } from "./types";
 
@@ -37,6 +38,7 @@ export async function lookupCongress(input: PoliticalAdapterInput): Promise<Poli
     };
   }>(`https://api.congress.gov/v3/member/${bioguide}?api_key=${key}`);
   const display = member?.member?.directOrderName || member?.member?.name || name;
+  if (!sameName(display, name)) return emptyFragment();
   const chamber = member?.member?.terms?.[0]?.chamber || "Congress";
   const person = makeEntity({
     name: display,
@@ -110,7 +112,8 @@ async function searchBioguide(name: string, key: string): Promise<string | undef
   const data = await politicalGetJson<{
     members?: Array<{ bioguideId?: string; name?: string }>;
   }>(`https://api.congress.gov/v3/member?query=${encodeURIComponent(name)}&limit=5&api_key=${key}`);
-  return data?.members?.[0]?.bioguideId;
+  const hit = data?.members?.find((member) => member.name && sameName(member.name, name));
+  return hit?.bioguideId;
 }
 
 async function lookupSponsored(

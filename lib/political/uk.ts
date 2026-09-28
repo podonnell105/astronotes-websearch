@@ -6,6 +6,7 @@ import {
 } from "../ontology";
 import type { InterestCategory } from "../types";
 import { politicalGetJson } from "./http";
+import { sameName } from "./names";
 import type { PoliticalAdapterInput, PoliticalFragment } from "./types";
 import { emptyFragment } from "./types";
 
@@ -48,6 +49,7 @@ export async function lookupUkParliament(input: PoliticalAdapterInput): Promise<
     };
   }>(`https://members-api.parliament.uk/api/Members/${memberId}`);
   const display = member?.value?.nameDisplayAs || name;
+  if (!sameName(display, name)) return emptyFragment();
   const person = makeEntity({
     name: display,
     type: "person",
@@ -144,7 +146,10 @@ async function searchMemberId(name: string): Promise<string | undefined> {
   const data = await politicalGetJson<{ items?: MemberHit[] }>(
     `https://members-api.parliament.uk/api/Members/Search?Name=${encodeURIComponent(name)}&skip=0&take=5`,
   );
-  const id = data?.items?.[0]?.value?.id;
+  const hit = data?.items?.find((item) =>
+    sameName(item.value?.nameDisplayAs || item.value?.nameListAs || "", name),
+  );
+  const id = hit?.value?.id;
   return id ? String(id) : undefined;
 }
 

@@ -1,5 +1,7 @@
 import type { DataSourceId } from "../dataCatalog";
 import { inferOverlaps } from "../inference";
+import { linkPoliticalGraph } from "./link";
+import { personNameFromQuery, scanPersonNames } from "./names";
 import { mergeEntity, mergeIdentifiers, registerValidation, ruleValidation } from "../ontology";
 import { addEvidence } from "../evidence";
 import { addRelationship, upsertEntity } from "../graph";
@@ -108,10 +110,14 @@ export async function runPoliticalIngest(input: {
     ...rel,
     id: `${rel.source}__${rel.type}__${rel.target}${rel.id.split("__").slice(3).join("__") ? `__${rel.id.split("__").slice(3).join("__")}` : ""}`,
   }));
-  const inferred = inferOverlaps(entities, remapped);
+  const linked = linkPoliticalGraph(entities, remapped, input.query, {
+    subjectName: subject.person?.name || personNameFromQuery(input.query),
+  });
+  const inferred = inferOverlaps(linked.entities, linked.relationships);
+  const seen = new Set(linked.relationships.map((rel) => rel.id));
   return {
-    entities,
-    relationships: [...remapped, ...inferred],
+    entities: linked.entities,
+    relationships: [...linked.relationships, ...inferred.filter((rel) => !seen.has(rel.id))],
     sources: merged.sources,
     skipped: merged.skipped,
   };
@@ -122,11 +128,9 @@ function subjectNames(query: string, existing: Entity[]): string[] {
     .filter((entity) => entity.type === "person" || entity.kind === "person")
     .map((entity) => entity.name);
   const quoted = [...query.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
-  const proper = query
-    .split(/[,.?!:;()]+/)
-    .map((part) => part.trim())
-    .filter((part) => /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+$/.test(part));
-  return unique([...quoted, ...proper, ...fromExisting, query.replace(/^.*?\b(?:for|about|on)\s+/i, "").trim()]).slice(0, 6);
+  const names = unique([...quoted, ...scanPersonNames(query), ...fromExisting]);
+  if (names.length === 0 && query.trim()) names.push(query.trim());
+  return names.slice(0, 6);
 }
 
 function companyHints(fragment: PoliticalFragment): string[] {

@@ -246,6 +246,10 @@ export function ResearchWorkspace({
             : [...current, event.relationship],
         );
         break;
+      case "graph":
+        setEntities(event.entities);
+        setRelationships(event.relationships);
+        break;
       case "validation":
         setValidations((current) => ({
           ...current,

@@ -21,11 +21,12 @@ export function layoutGraph(nodes: Node[], edges: Edge[], direction: "LR" | "TB"
   graph.setDefaultEdgeLabel(() => ({}));
   graph.setGraph({
     rankdir: direction,
-    nodesep: 72,
-    ranksep: 132,
-    edgesep: 28,
-    marginx: 32,
-    marginy: 32,
+    nodesep: 44,
+    ranksep: 96,
+    edgesep: 18,
+    ranker: "tight-tree",
+    marginx: 28,
+    marginy: 28,
   });
 
   for (const node of nodes) {
@@ -37,19 +38,82 @@ export function layoutGraph(nodes: Node[], edges: Edge[], direction: "LR" | "TB"
 
   layout(graph);
 
-  return nodes.map((node) => {
-    const placed = graph.node(node.id);
-    if (!placed) return node;
+  const placed = nodes.map((node) => {
+    const spot = graph.node(node.id);
+    if (!spot) return node;
     return {
       ...node,
       position: {
-        x: placed.x - NODE_WIDTH / 2,
-        y: placed.y - NODE_HEIGHT / 2,
+        x: spot.x - NODE_WIDTH / 2,
+        y: spot.y - NODE_HEIGHT / 2,
       },
       sourcePosition: direction === "LR" ? Position.Right : Position.Bottom,
       targetPosition: direction === "LR" ? Position.Left : Position.Top,
     } as Node;
   });
+  return packComponents(placed, edges);
+}
+
+const COMPONENT_GAP = 72;
+
+function packComponents(nodes: Node[], edges: Edge[]): Node[] {
+  if (nodes.length <= 1) return nodes;
+  const groups = componentsOf(nodes, edges).sort((a, b) => b.length - a.length);
+  if (groups.length <= 1) return nodes;
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  let cursorX = 0;
+  let cursorY = 0;
+  let rowHeight = 0;
+  const rowWidth = Math.max(960, Math.ceil(Math.sqrt(groups.length)) * 520);
+
+  for (const ids of groups) {
+    const members = ids.map((id) => byId.get(id)).filter((node): node is Node => Boolean(node));
+    if (members.length === 0) continue;
+    const minX = Math.min(...members.map((node) => node.position.x));
+    const minY = Math.min(...members.map((node) => node.position.y));
+    const maxX = Math.max(...members.map((node) => node.position.x + NODE_WIDTH));
+    const maxY = Math.max(...members.map((node) => node.position.y + NODE_HEIGHT));
+    const width = maxX - minX;
+    const height = maxY - minY;
+    if (cursorX > 0 && cursorX + width > rowWidth) {
+      cursorX = 0;
+      cursorY += rowHeight + COMPONENT_GAP;
+      rowHeight = 0;
+    }
+    const dx = cursorX - minX;
+    const dy = cursorY - minY;
+    for (const node of members) {
+      node.position = { x: node.position.x + dx, y: node.position.y + dy };
+    }
+    cursorX += width + COMPONENT_GAP;
+    rowHeight = Math.max(rowHeight, height);
+  }
+  return nodes;
+}
+
+function componentsOf(nodes: Node[], edges: Edge[]): string[][] {
+  const adjacency = new Map<string, string[]>();
+  for (const node of nodes) adjacency.set(node.id, []);
+  for (const edge of edges) {
+    adjacency.get(edge.source)?.push(edge.target);
+    adjacency.get(edge.target)?.push(edge.source);
+  }
+  const seen = new Set<string>();
+  const groups: string[][] = [];
+  for (const node of nodes) {
+    if (seen.has(node.id)) continue;
+    const group: string[] = [];
+    const stack = [node.id];
+    while (stack.length) {
+      const id = stack.pop();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      group.push(id);
+      for (const next of adjacency.get(id) ?? []) stack.push(next);
+    }
+    groups.push(group);
+  }
+  return groups;
 }
 
 export function edgeLanes(nodes: Node[], edges: Edge[]): Map<string, EdgeLane> {

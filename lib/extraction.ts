@@ -1,4 +1,4 @@
-import { hasOpenAI } from "./config";
+import { hasOpenAI, isOpenAIAuthError } from "./config";
 import { DEMO_ENTITIES, DEMO_RELATIONSHIPS } from "./demo";
 import { EXTRACT_MODELS } from "./models";
 import type { Document } from "./search";
@@ -155,6 +155,12 @@ export async function extractKnowledge(
         lastError = chatError;
       }
     }
+  }
+
+  if (isOpenAIAuthError(lastError)) {
+    throw new Error(
+      "OpenAI API key expired. Create a new key at https://platform.openai.com/api-keys and set OPENAI_API_KEY on Railway.",
+    );
   }
 
   throw new Error(

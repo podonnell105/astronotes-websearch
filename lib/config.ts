@@ -6,6 +6,13 @@ export function hasOpenAI(): boolean {
   return Boolean(process.env.OPENAI_API_KEY?.trim());
 }
 
+export function isOpenAIAuthError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /401|api key has expired|invalid_api_key|incorrect api key|invalid api key/i.test(
+    message,
+  );
+}
+
 export function hasTavily(): boolean {
   return Boolean(process.env.TAVILY_API_KEY?.trim());
 }
