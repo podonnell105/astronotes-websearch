@@ -1,4 +1,5 @@
 import { hasOpenAI, isOpenAIAuthError } from "./config";
+import { sameName } from "./political/names";
 import { DEMO_ENTITIES, DEMO_RELATIONSHIPS } from "./demo";
 import { EXTRACT_MODELS } from "./models";
 import type { Document } from "./search";
@@ -172,6 +173,7 @@ function normalizeExtraction(raw: unknown, existing: Entity[] = []): Extraction 
   const rec = (raw ?? {}) as Record<string, unknown>;
   const entities: Entity[] = [];
   const seen = new Set<string>();
+  const idMap = new Map<string, string>();
 
   if (Array.isArray(rec.entities)) {
     for (const item of rec.entities) {
@@ -179,9 +181,13 @@ function normalizeExtraction(raw: unknown, existing: Entity[] = []): Extraction 
       const e = item as Record<string, unknown>;
       const name = String(e.name ?? "").trim();
       if (!name) continue;
-      const id = slugify(String(e.id || name));
+      const proposed = slugify(String(e.id || name));
+      const id = existingIdFor(name, proposed, existing) ?? proposed;
+      idMap.set(proposed, id);
+      idMap.set(slugify(name), id);
       if (seen.has(id)) continue;
       seen.add(id);
+      if (existing.some((entity) => entity.id === id)) continue;
       entities.push({
         id,
         name,
@@ -201,8 +207,8 @@ function normalizeExtraction(raw: unknown, existing: Entity[] = []): Extraction 
     for (const item of rec.relationships) {
       if (!item || typeof item !== "object") continue;
       const r = item as Record<string, unknown>;
-      const source = slugify(String(r.source ?? ""));
-      const target = slugify(String(r.target ?? ""));
+      const source = mappedId(String(r.source ?? ""), idMap, existing);
+      const target = mappedId(String(r.target ?? ""), idMap, existing);
       const type = slugify(String(r.type ?? "related_to")).replace(/-/g, "_");
       if (!source || !target || source === target) continue;
       if (!entityIds.has(source) || !entityIds.has(target)) continue;
@@ -227,6 +233,23 @@ function normalizeExtraction(raw: unknown, existing: Entity[] = []): Extraction 
   }
 
   return { entities, relationships };
+}
+
+function existingIdFor(name: string, proposed: string, existing: Entity[]): string | undefined {
+  const byId = existing.find((entity) => entity.id === proposed || entity.id === slugify(name));
+  if (byId) return byId.id;
+  const byName = existing.find((entity) => sameName(entity.name, name));
+  return byName?.id;
+}
+
+function mappedId(value: string, idMap: Map<string, string>, existing: Entity[]): string {
+  const proposed = slugify(value);
+  const mapped = idMap.get(proposed);
+  if (mapped) return mapped;
+  const known = existing.find(
+    (entity) => entity.id === proposed || slugify(entity.name) === proposed || sameName(entity.name, value),
+  );
+  return known?.id ?? proposed;
 }
 
 export function attachNewEntities(

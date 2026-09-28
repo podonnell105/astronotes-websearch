@@ -37,7 +37,8 @@ export function linkPoliticalGraph(
     return next ? [next] : [];
   });
 
-  const kept = keepSubjectComponent(subject.id, merged.entities, rewritten);
+  const stitched = stitchToSubject(subject, party, merged.entities, rewritten);
+  const kept = keepSubjectComponent(subject.id, merged.entities, stitched);
   return {
     entities: kept.entities,
     relationships: kept.relationships,
@@ -245,6 +246,72 @@ function moneyAnchor(
     if (toParty && !toPerson) return party;
   }
   return subject;
+}
+
+function stitchToSubject(
+  subject: Entity,
+  party: Entity | undefined,
+  entities: Entity[],
+  relationships: Relationship[],
+): Relationship[] {
+  const extra: Relationship[] = [...relationships];
+  for (const ids of componentIds(entities, relationships)) {
+    if (ids.has(subject.id)) continue;
+    const members = entities.filter((entity) => ids.has(entity.id));
+    const stranger = members.find(
+      (entity) =>
+        (entity.kind === "person" || entity.type === "person") && !sameName(entity.name, subject.name),
+    );
+    if (stranger) continue;
+    const claims = relationships.filter((rel) => ids.has(rel.source) && ids.has(rel.target));
+    const text = [...members.map((entity) => entity.name), ...claims.map((rel) => rel.claim)].join(" ");
+    const anchor = party && nameInText(party.name, text) && !nameInText(subject.name, text) ? party : subject;
+    const hub = [...members].sort((a, b) => hubScore(b) - hubScore(a))[0];
+    if (!hub || hub.id === anchor.id) continue;
+    if (extra.some((rel) => rel.source === hub.id && rel.target === anchor.id)) continue;
+    extra.push({
+      id: `${hub.id}__related_to__${anchor.id}`,
+      source: hub.id,
+      target: anchor.id,
+      type: "related_to",
+      claim: `${hub.name} is linked to ${anchor.name} from the register records for this research.`,
+      status: "unclear",
+      basis: "recorded",
+    });
+  }
+  return extra;
+}
+
+function hubScore(entity: Entity): number {
+  if (isOrganization(entity)) return 3;
+  if (entity.kind === "person" || entity.type === "person") return 0;
+  return 1;
+}
+
+function componentIds(entities: Entity[], relationships: Relationship[]): Set<string>[] {
+  const adjacency = new Map<string, string[]>();
+  for (const entity of entities) adjacency.set(entity.id, []);
+  for (const rel of relationships) {
+    if (rel.source === rel.target) continue;
+    adjacency.get(rel.source)?.push(rel.target);
+    adjacency.get(rel.target)?.push(rel.source);
+  }
+  const seen = new Set<string>();
+  const groups: Set<string>[] = [];
+  for (const entity of entities) {
+    if (seen.has(entity.id)) continue;
+    const group = new Set<string>();
+    const stack = [entity.id];
+    while (stack.length) {
+      const id = stack.pop();
+      if (!id || group.has(id)) continue;
+      group.add(id);
+      seen.add(id);
+      for (const next of adjacency.get(id) ?? []) stack.push(next);
+    }
+    groups.push(group);
+  }
+  return groups;
 }
 
 function keepSubjectComponent(
