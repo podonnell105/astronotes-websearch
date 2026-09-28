@@ -1,11 +1,14 @@
 "use client";
 
+import { formatPublished } from "@/lib/claims";
+import { hostnameOf } from "@/lib/sources";
 import { formatEpisodeTime } from "@/lib/timeline";
 import {
   entityTypeChip,
   type Entity,
   type EvidenceRecord,
   type Relationship,
+  type SearchResult,
 } from "@/lib/types";
 
 export function EntityInfoPanel({
@@ -181,25 +184,53 @@ export function EntityInfoPanel({
                 </p>
               </div>
             )}
-            {(evidence?.sources.length
-              ? evidence.sources
-              : selected.sourceUrl
-                ? [{ title: selected.sourceUrl, url: selected.sourceUrl, snippet: "" }]
-                : []
-            ).slice(0, 3).map((source) => (
-              <a
-                key={source.url}
-                href={source.url}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-2 block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-accent hover:text-ink"
-              >
-                {source.source || source.title}
-              </a>
-            ))}
+            <EvidenceSources
+              sources={
+                evidence?.sources.length
+                  ? evidence.sources
+                  : selected.sourceUrl
+                    ? [{ title: selected.sourceUrl, url: selected.sourceUrl, snippet: "" }]
+                    : []
+              }
+            />
           </div>
         )}
       </div>
     </aside>
+  );
+}
+
+function EvidenceSources({ sources }: { sources: SearchResult[] }) {
+  if (sources.length === 0) return null;
+
+  return (
+    <div className="mt-3">
+      <div className="label mb-2">Sources</div>
+      <ol className="space-y-3">
+        {sources.map((sourceItem, index) => (
+          <li key={sourceItem.url} className="text-[12px] text-muted">
+            <div className="flex gap-2">
+              <span className="font-mono text-[10px] text-dim">{index + 1}.</span>
+              <a
+                href={sourceItem.url}
+                target="_blank"
+                rel="noreferrer"
+                className="truncate font-mono text-[10px] uppercase tracking-[0.12em] text-accent hover:text-ink"
+              >
+                {sourceItem.source || hostnameOf(sourceItem.url) || sourceItem.title}
+              </a>
+            </div>
+            <div className="mt-1 pl-5 font-mono text-[10px] text-dim">
+              {formatPublished(sourceItem.publishedAt)}
+            </div>
+            {sourceItem.snippet && (
+              <p className="mt-1 pl-5 text-[12px] leading-5 text-dim">
+                “{sourceItem.snippet}”
+              </p>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
