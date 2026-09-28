@@ -87,7 +87,30 @@ export function SearchBar({
         )}
       </div>
       {!compact && (
-        <div className="mt-3 flex items-center justify-end gap-2">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-2">
+            {[
+              ["Person", "Person: "],
+              ["Company", "Company: "],
+              ["Product", "Product: "],
+              ["Question", ""],
+            ].map(([label, prefix]) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => {
+                  const stripped = query.replace(
+                    /^(person|company|product|organisation|organization|question)\s*:\s*/i,
+                    "",
+                  );
+                  onQuery(prefix ? `${prefix}${stripped}` : stripped);
+                }}
+                className="border border-line px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted hover:border-line-strong hover:text-ink"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             onClick={onSubmit}

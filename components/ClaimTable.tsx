@@ -220,7 +220,7 @@ export function ClaimTable({
                     </td>
                     <td>
                       <div className={`claim-basis claim-basis--${row.basis}`}>
-                        {row.basis}
+                        {row.knowledge ?? row.basis}
                       </div>
                     </td>
                     <td>

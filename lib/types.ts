@@ -39,6 +39,39 @@ export type EntityIdentifier = {
 export const RELATIONSHIP_BASES = ["recorded", "extracted", "inferred"] as const;
 export type RelationshipBasis = (typeof RELATIONSHIP_BASES)[number];
 
+export const KNOWLEDGE_STATES = [
+  "fact",
+  "derived",
+  "inferred",
+  "uncertain",
+  "contradicted",
+] as const;
+export type KnowledgeState = (typeof KNOWLEDGE_STATES)[number];
+
+export type EvidenceItem = {
+  source: string;
+  snippet: string;
+  url: string;
+  directness: "direct" | "secondary" | "discovery";
+  fetchedAt?: string;
+};
+
+export function normalizeKnowledgeState(value: unknown): KnowledgeState | undefined {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (
+    raw === "fact" ||
+    raw === "derived" ||
+    raw === "inferred" ||
+    raw === "uncertain" ||
+    raw === "contradicted"
+  ) {
+    return raw;
+  }
+  return undefined;
+}
+
 export const POLITICAL_PREDICATES = [
   "holds_office",
   "member_of",
@@ -220,6 +253,9 @@ export type Relationship = {
   evidenceSnippet?: string;
   time?: EpisodeTime;
   basis?: RelationshipBasis;
+  knowledge?: KnowledgeState;
+  confidence?: number;
+  evidence?: EvidenceItem[];
   category?: InterestCategory | string;
   estimated?: boolean;
   unresolved?: boolean;
@@ -393,6 +429,7 @@ export type SessionView = {
   chat: ChatTurn[];
   status: "running" | "complete" | "error";
   jevStatus: "jev" | "mock";
+  spec?: import("./research/spec").ResearchSpec;
   stats: {
     sources: number;
     entities: number;

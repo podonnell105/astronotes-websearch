@@ -4,6 +4,8 @@ import {
   relationshipsSatisfyFacets,
   type ResearchPlan,
 } from "./researchPlan";
+import { coverFacets } from "./research/coverage";
+import type { ResearchSpec } from "./research/spec";
 
 export const MAX_ANSWER_TRIES = 3;
 export const MIN_ANSWER_SCORE = 8;
@@ -66,6 +68,14 @@ export function answerCoverage(input: {
     person,
     missing: score >= MIN_ANSWER_SCORE ? "" : input.plan.gaps[0] || `enough facts about ${person}`,
   };
+}
+
+export function specCoverageReport(input: {
+  spec: ResearchSpec;
+  entities: Entity[];
+  relationships: Relationship[];
+}) {
+  return coverFacets(input);
 }
 
 function specificFacetClaim(rel: Relationship, plan: ResearchPlan): boolean {

@@ -10,7 +10,7 @@ import type { DroppedSource, SearchResult, SourcePolicy } from "./types";
 export const MIN_KEEP = 4;
 export const SOURCE_POLICY_STORAGE_KEY = "an_source_policy";
 
-export const DENIED_DOMAINS = [
+export const SOCIAL_DOMAINS = [
   "facebook.com",
   "fb.com",
   "instagram.com",
@@ -19,11 +19,9 @@ export const DENIED_DOMAINS = [
   "twitter.com",
   "pinterest.com",
   "reddit.com",
-  "t.co",
-  "bit.ly",
-  "tinyurl.com",
-  "ow.ly",
 ];
+
+export const DENIED_DOMAINS = ["t.co", "bit.ly", "tinyurl.com", "ow.ly"];
 
 export function emptySourcePolicy(): SourcePolicy {
   return {
@@ -53,6 +51,12 @@ export function hostIsDenied(url: string, extra: string[] = []): boolean {
   const host = hostnameOf(url);
   if (!host) return false;
   return [...DENIED_DOMAINS, ...extra].some((domain) => hostMatchesDomain(host, domain));
+}
+
+export function isSocialDiscoveryHost(url: string): boolean {
+  const host = hostnameOf(url);
+  if (!host) return false;
+  return SOCIAL_DOMAINS.some((domain) => hostMatchesDomain(host, domain));
 }
 
 export function parseDomainList(value: string): string[] {

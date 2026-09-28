@@ -26,9 +26,8 @@ import {
   searchWeb,
   type Document,
 } from "./search";
-import { inferQueryPolicy, inferredSourceLabel } from "./queryPolicy";
+import { inferAnalystRole, inferredSourceLabel } from "./queryPolicy";
 import { emptySourcePolicy, hostIsDenied, mergeDropped, normalizeSourcePolicy, summarizeDropped } from "./sources";
-import { answerCoverage, MAX_ANSWER_TRIES, PAGES_PER_TRY } from "./coverage";
 import {
   buildNeighborhood,
   facetKeywords,
@@ -37,6 +36,11 @@ import {
   planResearch,
   type ResearchPlan,
 } from "./researchPlan";
+import { compileResearchSpec } from "./research/spec";
+import { coverFacets } from "./research/coverage";
+import { catalogIdsFrom, isGraphSource, selectSources } from "./research/registry";
+import { planIterationQueries } from "./research/planner";
+import { applyKnowledge } from "./research/knowledge";
 import {
   createSession,
   getSession,
@@ -93,13 +97,27 @@ export async function runResearch(
     session.sourcePolicy = incomingPolicy;
     await persistSession(session);
   }
-  session.sourcePolicy = inferQueryPolicy(nextQuery, session.sourcePolicy);
+  const existingForSpec = [...session.entities.values()];
+  const existingRelsForSpec = [...session.relationships.values()];
+  const spec = compileResearchSpec(nextQuery, {
+    spec: session.spec,
+    entities: existingForSpec,
+    relationships: existingRelsForSpec,
+  });
+  session.spec = spec;
+  const selectedSources = selectSources(spec);
+  session.sourcePolicy = {
+    ...session.sourcePolicy,
+    role: inferAnalystRole(nextQuery),
+    dataSources: catalogIdsFrom(selectedSources),
+  };
   await persistSession(session);
   const policy = session.sourcePolicy;
   const extending = Boolean(sessionId);
   const preferExistingLinks = Boolean(options?.preferExistingLinks && extending);
   const stagger = runtime.mode === "demo" ? 140 : 0;
-  let ranPolitical = isPoliticalRun(policy);
+  const wantGraphAdapters = selectedSources.some((id) => isGraphSource(id));
+  let ranPolitical = wantGraphAdapters;
 
   const sessionEvent = { type: "session" as const, sessionId: session.id };
   rememberEvent(session, sessionEvent);
@@ -113,7 +131,15 @@ export async function runResearch(
   };
   rememberEvent(session, modeEvent);
   emit(modeEvent);
-  log(emit, session, `Choosing ${inferredSourceLabel(policy)} sources from the query`);
+  log(emit, session, `Research spec: ${spec.intent} · ${spec.subjects.map((item) => item.name).join(", ") || "subject"}`);
+  log(
+    emit,
+    session,
+    `Facets: ${spec.facets.slice(0, 8).join(", ")} · sources: ${selectedSources.slice(0, 8).join(", ")}`,
+  );
+  if (policy.role !== "custom") {
+    log(emit, session, `${inferredSourceLabel(policy)} pack used as a source boost`);
+  }
 
   try {
     let existingEntities = [...session.entities.values()];
@@ -127,8 +153,8 @@ export async function runResearch(
       })),
     );
 
-    if (isPoliticalRun(policy)) {
-      log(emit, session, "Looking up political registers...");
+    if (wantGraphAdapters) {
+      log(emit, session, "Looking up structured registers...");
       const fragment = await runPoliticalIngest({
         query: nextQuery,
         policy,
@@ -166,11 +192,19 @@ export async function runResearch(
     const neighborhood = extending
       ? buildNeighborhood(nextQuery, existingEntities, existingRelationships)
       : [];
-    const plan = await planResearch(nextQuery, neighborhood, preferExistingLinks);
+    const plan = await planResearch(nextQuery, neighborhood, preferExistingLinks, spec);
     allowNewEntities = plan.allowNewEntities;
     gaps = plan.gaps;
     subjects = plan.subjects;
-    const searchQueries = plan.queries.length ? plan.queries : [plan.searchQuery];
+    const specQueries = planIterationQueries({
+      spec,
+      entities: existingEntities,
+      relationships: existingRelationships,
+      missing: spec.facets,
+      iteration: 1,
+    });
+    const searchQueries = (specQueries.length ? specQueries : plan.queries.length ? plan.queries : [plan.searchQuery])
+      .slice(0, spec.budgets.maxQueries);
     if (searchQueries.length > 1) {
       log(emit, session, `Planned ${searchQueries.length} focused searches`);
     }
@@ -220,7 +254,7 @@ export async function runResearch(
       }
     }
     if (results.length === 0 && !extending && !policy.onlyUrls.length) {
-      if (plan.facets.includes("donors")) {
+      if (plan.facets.includes("donations")) {
         log(emit, session, "No donor sources — searching registers");
         const retryQueries = facetRetryQueries(plan);
         for (const query of retryQueries) log(emit, session, `Searching for: ${query}`);
@@ -318,27 +352,36 @@ export async function runResearch(
       let pool = results;
       const fetchedUrls = new Set(session.sources.map((source) => source.url));
 
-      for (let attempt = 1; attempt <= MAX_ANSWER_TRIES; attempt++) {
+      const maxTries = spec.budgets.maxIterations;
+      const pagesPerTry = spec.budgets.maxPages;
+
+      for (let attempt = 1; attempt <= maxTries; attempt++) {
         existingEntities = [...session.entities.values()];
         existingRelationships = [...session.relationships.values()];
-        let coverage = answerCoverage({
-          query: nextQuery,
-          plan,
+        const specCoverage = coverFacets({
+          spec,
           entities: [...existingEntities, ...extracted.entities],
           relationships: [...existingRelationships, ...extracted.relationships],
         });
+        const missingLabel = specCoverage.priorityGap
+          ? specCoverage.facets.find((item) => item.facet === specCoverage.priorityGap)?.gap
+          : "";
         log(
           emit,
           session,
-          `Try ${attempt}/${MAX_ANSWER_TRIES} for ${coverage.person} — coverage ${coverage.score}/10`,
+          `Try ${attempt}/${maxTries} — ${specCoverage.facets
+            .filter((item) => item.status !== "not_applicable")
+            .map((item) => `${item.facet} ${item.status}`)
+            .slice(0, 6)
+            .join(" · ")}${missingLabel ? ` · gap: ${missingLabel}` : ""}`,
         );
 
-        if (coverage.answered) {
-          log(emit, session, `Answered for ${coverage.person}`);
+        if (specCoverage.answered) {
+          log(emit, session, "Priority facets covered");
           break;
         }
 
-        if (plan.facets.includes("donors") && !ranPolitical) {
+        if (specCoverage.missing.includes("donations") && !ranPolitical) {
           await applyDonorRegisters(session, emit, nextQuery, policy, [
             ...existingEntities,
             ...extracted.entities,
@@ -346,41 +389,55 @@ export async function runResearch(
           ranPolitical = true;
           existingEntities = [...session.entities.values()];
           existingRelationships = [...session.relationships.values()];
-          coverage = answerCoverage({
-            query: nextQuery,
-            plan,
+        }
+
+        if (attempt > 1 && specCoverage.missing.length > 0) {
+          const followQueries = planIterationQueries({
+            spec,
             entities: [...existingEntities, ...extracted.entities],
             relationships: [...existingRelationships, ...extracted.relationships],
+            missing: specCoverage.missing,
+            iteration: attempt,
           });
-          log(
-            emit,
-            session,
-            `Try ${attempt}/${MAX_ANSWER_TRIES} for ${coverage.person} — coverage ${coverage.score}/10 after registers`,
-          );
-          if (coverage.answered) {
-            log(emit, session, `Answered for ${coverage.person}`);
-            break;
+          if (followQueries.length > 0) {
+            log(emit, session, `Following the graph: ${followQueries.join(" · ")}`);
+            const more = mergeSearchOutcomes(
+              await Promise.all(followQueries.map((query) => runSearch(query))),
+            );
+            recordDropped(session, emit, more.dropped);
+            pool = mergeUniqueResults(pool, more.results);
           }
         }
 
         const filter = relevanceFilter(plan, [...existingEntities, ...extracted.entities]);
         let batch = scoreResults(pool, filter)
           .filter((item) => item.score >= MIN_SCRAPE_SCORE && !fetchedUrls.has(item.url))
-          .slice(0, PAGES_PER_TRY);
+          .slice(0, pagesPerTry);
 
         if (batch.length === 0 && !extending && !policy.onlyUrls.length) {
           log(
             emit,
             session,
-            `No pages above ${MIN_SCRAPE_SCORE - 1} for ${coverage.person} — searching again`,
+            `No pages above ${MIN_SCRAPE_SCORE - 1} — searching again for ${specCoverage.priorityGap ?? "gaps"}`,
           );
-          const retryQueries = plan.facets.includes("donors")
+          const retryQueries = specCoverage.missing.includes("donations")
             ? facetRetryQueries(plan)
+            : planIterationQueries({
+                spec,
+                entities: [...existingEntities, ...extracted.entities],
+                relationships: [...existingRelationships, ...extracted.relationships],
+                missing: specCoverage.missing,
+                iteration: attempt,
+              });
+          const fallbackQueries = retryQueries.length
+            ? retryQueries
             : [subjects[0] ? `"${subjects[0]}"` : nameOnlySearchQuery(nextQuery)];
-          for (const query of retryQueries) log(emit, session, `Searching for: ${query}`);
+          for (const query of fallbackQueries) log(emit, session, `Searching for: ${query}`);
           const more = mergeSearchOutcomes(
             await Promise.all(
-              retryQueries.map((query) => runSearch(query, !plan.facets.includes("donors"))),
+              fallbackQueries.map((query) =>
+                runSearch(query, !specCoverage.missing.includes("donations")),
+              ),
             ),
           );
           recordDropped(session, emit, more.dropped);
@@ -391,15 +448,15 @@ export async function runResearch(
           pool = mergeUniqueResults(pool, extraRelevant.results);
           batch = scoreResults(pool, filter)
             .filter((item) => item.score >= MIN_SCRAPE_SCORE && !fetchedUrls.has(item.url))
-            .slice(0, PAGES_PER_TRY);
+            .slice(0, pagesPerTry);
         }
 
         if (batch.length === 0) {
-          if (attempt === MAX_ANSWER_TRIES) {
+          if (attempt === maxTries) {
             log(
               emit,
               session,
-              `Still unanswered for ${coverage.person} after ${MAX_ANSWER_TRIES} tries (${coverage.missing})`,
+              `Still missing ${specCoverage.priorityGap ?? "facts"} after ${maxTries} tries`,
             );
           }
           continue;
@@ -408,7 +465,7 @@ export async function runResearch(
         log(
           emit,
           session,
-          `Scraping ${batch.length} pages about ${coverage.person} (score > ${MIN_SCRAPE_SCORE - 1})`,
+          `Scraping ${batch.length} pages for ${specCoverage.priorityGap ?? spec.subjects[0]?.name ?? "the subject"} (score > ${MIN_SCRAPE_SCORE - 1})`,
         );
         for (const item of batch) {
           log(emit, session, `  ${item.score}/10 ${item.title}`);
@@ -514,9 +571,8 @@ export async function runResearch(
     }
     stats(emit, session);
 
-    const settled = answerCoverage({
-      query: nextQuery,
-      plan,
+    const settled = coverFacets({
+      spec,
       entities: [...session.entities.values()],
       relationships: [...session.relationships.values()],
     });
@@ -524,7 +580,7 @@ export async function runResearch(
       log(
         emit,
         session,
-        `Coverage ${settled.score}/10 for ${settled.person} — ${settled.missing}`,
+        `Remaining gaps: ${settled.missing.join(", ") || "none"} · legacy ${settled.legacyScore}/10`,
       );
     }
 
@@ -653,11 +709,21 @@ async function resumeOrThrow(sessionId: string, query: string): Promise<SessionR
 
 function complete(session: SessionRecord, emit: Emit): SessionRecord {
   if (isPoliticalRun(session.sourcePolicy)) settlePoliticalGraph(session, emit);
+  applySessionKnowledge(session);
   session.status = "complete";
   const event = { type: "complete" as const, sessionId: session.id };
   rememberEvent(session, event);
   emit(event);
   return session;
+}
+
+function applySessionKnowledge(session: SessionRecord) {
+  for (const rel of session.relationships.values()) {
+    session.relationships.set(
+      rel.id,
+      applyKnowledge(rel, session.validations.get(rel.id), session.evidence.get(rel.id)),
+    );
+  }
 }
 
 function settlePoliticalGraph(session: SessionRecord, emit: Emit) {

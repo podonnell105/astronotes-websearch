@@ -32,6 +32,12 @@ const DEMOTE = new Set([
   "ebay.com",
   "pinterest.com",
   "tiktok.com",
+  "facebook.com",
+  "fb.com",
+  "instagram.com",
+  "x.com",
+  "twitter.com",
+  "reddit.com",
 ]);
 
 const FIRST_PARTY_HINTS = [

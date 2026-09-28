@@ -17,7 +17,7 @@ export function EvidencePanel({
     return (
       <aside className="flex h-full min-h-0 flex-col border-l border-line bg-panel">
         <div className="border-b border-line px-4 py-3">
-          <div className="label">Evidence</div>
+          <div className="label">Why is this here?</div>
         </div>
         <div className="flex flex-1 items-center px-5 text-[13px] leading-6 text-dim">
           Select a relationship to inspect its audit trail.
@@ -36,7 +36,7 @@ export function EvidencePanel({
   return (
     <aside className="flex h-full min-h-0 flex-col border-l border-line bg-panel">
       <div className="border-b border-line px-4 py-3">
-        <div className="label">Evidence</div>
+        <div className="label">Why is this here?</div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
         <div className="space-y-2">
@@ -51,6 +51,13 @@ export function EvidencePanel({
         </div>
 
         <div className="mt-8 space-y-5">
+          <Meta
+            label="Knowledge"
+            value={relationship.knowledge ?? (relationship.basis === "recorded" ? "fact" : relationship.basis === "inferred" ? "inferred" : "derived")}
+          />
+          {typeof relationship.confidence === "number" && (
+            <Meta label="Confidence" value={formatPct(relationship.confidence)} />
+          )}
           <Meta label="Basis" value={relationship.basis ?? "extracted"} />
           <Meta
             label="Jev decision"
@@ -115,16 +122,27 @@ export function EvidencePanel({
           </ol>
         </section>
 
-        {relationship.basis === "inferred" && relationship.reasoning && (
+        {(relationship.knowledge === "inferred" || relationship.basis === "inferred") &&
+          relationship.reasoning && (
           <section className="mt-8">
             <div className="label mb-3">Reasoning</div>
             <ol className="space-y-2 text-[13px] leading-6 text-muted">
               {relationship.reasoning.steps.map((step) => (
                 <li key={step.order}>
                   {step.order}. {step.text}
+                  {step.relationshipId ? (
+                    <span className="ml-2 font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+                      {step.relationshipId}
+                    </span>
+                  ) : null}
                 </li>
               ))}
             </ol>
+            {relationship.reasoning.premiseIds?.length ? (
+              <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+                Premises: {relationship.reasoning.premiseIds.join(" · ")}
+              </p>
+            ) : null}
             <p className="mt-3 text-[13px] leading-6 text-dim">
               {relationship.reasoning.disclaimer}
             </p>

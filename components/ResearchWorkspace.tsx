@@ -4,7 +4,9 @@ import { AccountHeader } from "@/components/AccountHeader";
 import { AppShell } from "@/components/AppShell";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ClaimTable } from "@/components/ClaimTable";
+import { DossierPanel } from "@/components/DossierPanel";
 import { EntityInfoPanel } from "@/components/EntityInfoPanel";
+import { EvidencePanel } from "@/components/EvidencePanel";
 import { ModeBadge, ResearchStatus } from "@/components/ModeBadge";
 import { PixelComposeMotif, formatElapsed } from "@/components/PixelComposeMotif";
 import { ResearchFeed } from "@/components/ResearchFeed";
@@ -51,7 +53,7 @@ const KnowledgeGraph = dynamic(
 );
 
 type Status = "idle" | "running" | "complete" | "error";
-type MainView = "graph" | "claims";
+type MainView = "graph" | "claims" | "dossier";
 type PhonePane = "graph" | "claims" | "chat";
 
 function applyView(session: SessionView) {
@@ -579,6 +581,7 @@ export function ResearchWorkspace({
   const asOfStamp = frozenAt ?? createdAt;
   const phoneChat = isPhone && phonePane === "chat" && !readOnly;
   const showClaims = isPhone ? phonePane === "claims" : view === "claims";
+  const showDossier = !isPhone && view === "dossier";
 
   return (
     <AppShell
@@ -692,6 +695,9 @@ export function ResearchWorkspace({
             <ToolbarToggle active={view === "claims"} onClick={() => setView("claims")}>
               Claims
             </ToolbarToggle>
+            <ToolbarToggle active={view === "dossier"} onClick={() => setView("dossier")}>
+              Dossier
+            </ToolbarToggle>
             <ToolbarToggle active={searchOpen} onClick={() => setSearchOpen((open) => !open)}>
               Search
             </ToolbarToggle>
@@ -789,6 +795,17 @@ export function ResearchWorkspace({
                     </p>
                   )}
                 </div>
+              ) : showDossier ? (
+                <DossierPanel
+                  entities={entities}
+                  relationships={relationships}
+                  selectedRelationshipId={selectedRelationshipId}
+                  onSelect={(id) => {
+                    selectRelationship(id);
+                    setView("graph");
+                    setPhonePane("graph");
+                  }}
+                />
               ) : showClaims ? (
                 <ClaimTable
                   entities={entities}
@@ -854,6 +871,16 @@ export function ResearchWorkspace({
                       onSelectConnection={selectRelationship}
                     />
                   </div>
+                  {selectedRelationship && (
+                    <div className="absolute bottom-4 left-4 z-20 hidden h-[min(420px,55%)] w-[320px] overflow-hidden border border-line bg-panel md:block">
+                      <EvidencePanel
+                        relationship={selectedRelationship}
+                        source={entities.find((entity) => entity.id === selectedRelationship.source)}
+                        target={entities.find((entity) => entity.id === selectedRelationship.target)}
+                        evidence={selectedEvidence}
+                      />
+                    </div>
+                  )}
                 </>
               )}
             </div>

@@ -146,9 +146,9 @@ export function EntityInfoPanel({
 
         {selected && (
           <div className="mt-4 border-t border-line pt-3">
-            <div className="label mb-2">Evidence</div>
+            <div className="label mb-2">Why is this here?</div>
             <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
-              {(selected.basis ?? "extracted")}
+              {(selected.knowledge ?? selected.basis ?? "extracted")}
               {selected.provenance?.fieldPath ? ` · ${selected.provenance.fieldPath}` : ""}
             </p>
             <p className="mt-2 text-[12px] leading-5 text-muted">

@@ -1,8 +1,18 @@
 import { hasOpenAI } from "./config";
 import { PLAN_MODELS } from "./models";
+import {
+  detectFacets,
+  facetById,
+  uniqueFacets,
+  relationshipMatchesFacet,
+  type FacetId,
+} from "./research/facets";
 import { entityMatchesQuery, rankKnownEntities, strategicSearchQuery, type KnownEntity } from "./search";
 import { formatEpisodeTime } from "./timeline";
 import type { Entity, Relationship } from "./types";
+
+export type { FacetId } from "./research/facets";
+export { detectFacets, facetKeywords } from "./research/facets";
 
 export type NeighborhoodFact = {
   id: string;
@@ -10,8 +20,6 @@ export type NeighborhoodFact = {
   type: string;
   facts: string[];
 };
-
-export type FacetId = "jobs" | "hires" | "product" | "funding" | "timeline" | "donors";
 
 export type ResearchPlan = {
   searchQuery: string;
@@ -43,6 +51,13 @@ const SKIP_FOCUS = new Set([
   "this",
   "that",
   "those",
+  "tell",
+  "understand",
+  "research",
+  "map",
+  "find",
+  "compare",
+  "help",
   "what",
   "when",
   "where",
@@ -51,63 +66,6 @@ const SKIP_FOCUS = new Set([
   "why",
 ]);
 
-const FACET_IDS = new Set<FacetId>(["jobs", "hires", "product", "funding", "timeline", "donors"]);
-
-const FACETS: {
-  id: FacetId;
-  test: RegExp;
-  gap: (subject: string) => string;
-  keywords: string[];
-}[] = [
-  {
-    id: "timeline",
-    test: /\b(timeline|history|career|lived|founded|acquired|biography|background|born)\b/i,
-    gap: (subject) => `when ${subject} lived, founded companies, or was acquired`,
-    keywords: ["biography", "timeline", "founded", "born", "career"],
-  },
-  {
-    id: "jobs",
-    test: /\b(job postings?|jobs|hiring|careers?|openings?|recruit)/i,
-    gap: (subject) => `open roles and job postings at ${subject}`,
-    keywords: ["jobs", "hiring", "careers", "openings"],
-  },
-  {
-    id: "hires",
-    test: /\b(recent hires?|hired|joined|appointment|new (cmo|cto|ceo|head|vp))\b/i,
-    gap: (subject) => `recent hires and leadership changes at ${subject}`,
-    keywords: ["hired", "joined", "appointment", "leadership"],
-  },
-  {
-    id: "product",
-    test: /\b(building next|roadmap|what are they building|product|shipping|launching)\b/i,
-    gap: (subject) => `what ${subject} is building next`,
-    keywords: ["product", "roadmap", "launch"],
-  },
-  {
-    id: "funding",
-    test: /\b(raised|funding|investors?|series [a-d]|valuation)\b/i,
-    gap: (subject) => `funding and investors for ${subject}`,
-    keywords: ["funding", "investors", "valuation", "raised"],
-  },
-  {
-    id: "donors",
-    test: /\b(donors?|donations?|donated|fundraising|who funds|campaign finance|register of interests)\b/i,
-    gap: (subject) => `donors, donations, gifts, and fundraising for ${subject}`,
-    keywords: [
-      "donor",
-      "donors",
-      "donation",
-      "donations",
-      "donated",
-      "fundraising",
-      "register of interests",
-      "electoral commission",
-    ],
-  },
-];
-
-const DONOR_REL_TYPES = new Set(["donated_to", "funds", "funded_by"]);
-const DONOR_CLAIM = /\b(donat|donor|fundraising|gift|hospitality|register of interests)\b/i;
 
 export function buildNeighborhood(
   question: string,
@@ -195,23 +153,13 @@ export function extractFocusSubjects(question: string): string[] {
   return found.slice(0, 5);
 }
 
-export function detectFacets(question: string): FacetId[] {
-  return FACETS.filter((facet) => facet.test.test(question)).map((facet) => facet.id);
-}
-
 export function isComplexQuestion(question: string): boolean {
   const facets = detectFacets(question);
-  if (facets.includes("donors")) return true;
+  if (facets.includes("donations")) return true;
   if (facets.length >= 2) return true;
   if (question.trim().length > 140) return true;
   if ((question.match(/[.?!]/g) ?? []).length >= 2) return true;
   return false;
-}
-
-export function facetKeywords(facets: FacetId[]): string[] {
-  return uniqueNames(
-    FACETS.filter((facet) => facets.includes(facet.id)).flatMap((facet) => facet.keywords),
-  );
 }
 
 export function detectJurisdictions(question: string, extra: string[] = []): string[] {
@@ -259,7 +207,7 @@ export function facetRetryQueries(plan: ResearchPlan): string[] {
   const focus = plan.subjects[0];
   if (!focus) return plan.queries;
   const quoted = `"${focus}"`;
-  if (!plan.facets.includes("donors")) return plan.queries;
+  if (!plan.facets.includes("donations")) return plan.queries;
   const party = plan.subjects.find((name) =>
     /\b(sinn|party|f[eé]in|fein|labour|conservative|dup|alliance|uup|sdlp)\b/i.test(name),
   );
@@ -279,23 +227,28 @@ export function heuristicResearchPlan(
   question: string,
   neighborhood: NeighborhoodFact[],
   preferExistingLinks = false,
+  spec?: { subjects?: Array<{ name: string }>; facets?: FacetId[]; geography?: string[] },
 ): ResearchPlan {
   void preferExistingLinks;
   const extracted = extractFocusSubjects(question);
-  const focus = neighborhood[0]?.name ?? extracted[0] ?? "";
+  const focus = neighborhood[0]?.name ?? spec?.subjects?.[0]?.name ?? extracted[0] ?? "";
   const subjects = uniqueNames([
     focus,
     ...extracted,
+    ...(spec?.subjects ?? []).map((subject) => subject.name),
     ...neighborhood.map((item) => item.name),
   ]).slice(0, 5);
 
   const queries = buildResearchQueries(question, subjects);
   const allowNewEntities = !isConnectQuestion(question);
-  const facets = detectFacets(question);
+  const facets = uniqueFacets([...detectFacets(question), ...(spec?.facets ?? [])]);
   const gaps = gapsFromQuestion(question, focus || subjects[0] || "this subject");
-  const jurisdictions = detectJurisdictions(question, [
-    ...subjects,
-    ...neighborhood.map((item) => item.name),
+  const jurisdictions = uniqueNames([
+    ...detectJurisdictions(question, [
+      ...subjects,
+      ...neighborhood.map((item) => item.name),
+    ]),
+    ...(spec?.geography ?? []),
   ]);
 
   return {
@@ -316,7 +269,7 @@ export function buildResearchQueries(question: string, subjects: string[]): stri
 
   const quoted = `"${focus}"`;
   const facets = detectFacets(question);
-  if (facets.includes("donors")) {
+  if (facets.includes("donations")) {
     return uniqueNames(
       [
         `${quoted} political donors`,
@@ -338,7 +291,7 @@ export function buildResearchQueries(question: string, subjects: string[]): stri
     facets.includes("timeline") || isHistoryQuestion(question)
       ? [`${quoted} founded lived acquired dates`]
       : [quoted];
-  if (facets.includes("product")) {
+  if (facets.includes("products")) {
     const product = extras.find(
       (name) => !name.toLowerCase().includes(focus.toLowerCase()),
     );
@@ -346,16 +299,16 @@ export function buildResearchQueries(question: string, subjects: string[]): stri
       product ? `${quoted} ${product} product` : `${quoted} product roadmap`,
     );
   }
-  if (facets.includes("jobs")) {
+  if (facets.includes("hiring")) {
     queries.push(`${quoted} jobs hiring careers`);
   }
-  if (facets.includes("hires")) {
+  if (facets.includes("employment")) {
     queries.push(`${quoted} recent hires joined`);
   }
   if (facets.includes("funding")) {
     queries.push(`${quoted} funding investors`);
   }
-  if (facets.includes("donors")) {
+  if (facets.includes("donations")) {
     queries.push(`${quoted} political donors`);
   }
 
@@ -367,21 +320,19 @@ export function buildResearchQueries(question: string, subjects: string[]): stri
 
 function gapsFromQuestion(question: string, subject: string): string[] {
   const facets = detectFacets(question);
-  const gaps = FACETS.filter((facet) => facets.includes(facet.id)).map((facet) =>
-    facet.gap(subject),
-  );
-  if (facets.includes("timeline") || (isHistoryQuestion(question) && !facets.includes("donors"))) {
+  const gaps = facets.map((facet) => facetById(facet).gap(subject));
+  if (facets.includes("timeline") || (isHistoryQuestion(question) && !facets.includes("donations"))) {
     if (!gaps.some((gap) => /lived|founded/.test(gap))) {
       gaps.unshift(`when ${subject} lived, founded companies, or was acquired`);
     }
   }
-  if (/personal|famil|born|educat|school|spouse/i.test(question) && !facets.includes("donors")) {
+  if (/personal|famil|born|educat|school|spouse/i.test(question) && !facets.includes("donations")) {
     gaps.push("personal life", "education", "family");
   }
   if (
     /career|role|minister|background|histor/i.test(question) &&
-    !facets.includes("hires") &&
-    !facets.includes("donors")
+    !facets.includes("employment") &&
+    !facets.includes("donations")
   ) {
     gaps.push("career history", "other roles");
   }
@@ -418,40 +369,6 @@ function uniqueNames(values: string[]): string[] {
   return out;
 }
 
-function uniqueFacets(values: FacetId[]): FacetId[] {
-  const seen = new Set<FacetId>();
-  const out: FacetId[] = [];
-  for (const value of values) {
-    if (seen.has(value)) continue;
-    seen.add(value);
-    out.push(value);
-  }
-  return out;
-}
-
-function relationshipMatchesFacet(
-  rel: { type: string; claim: string; category?: string },
-  facet: FacetId,
-): boolean {
-  if (facet === "donors") {
-    if (DONOR_REL_TYPES.has(rel.type)) return true;
-    if (rel.type === "declared_interest") {
-      const hay = `${rel.category ?? ""} ${rel.claim}`;
-      return DONOR_CLAIM.test(hay);
-    }
-    return DONOR_CLAIM.test(rel.claim);
-  }
-  if (facet === "funding") {
-    return (
-      ["funds", "funded_by", "invested_in", "investor_in"].includes(rel.type) ||
-      /\b(investor|funding|raised)\b/i.test(rel.claim)
-    );
-  }
-  const keywords = FACETS.find((item) => item.id === facet)?.keywords ?? [];
-  const hay = `${rel.type} ${rel.claim}`.toLowerCase();
-  return keywords.some((keyword) => hay.includes(keyword.toLowerCase()));
-}
-
 function titleCaseName(value: string): string {
   return value
     .trim()
@@ -464,8 +381,9 @@ export async function planResearch(
   question: string,
   neighborhood: NeighborhoodFact[],
   preferExistingLinks = false,
+  spec?: { subjects?: Array<{ name: string }>; facets?: FacetId[]; geography?: string[] },
 ): Promise<ResearchPlan> {
-  const fallback = heuristicResearchPlan(question, neighborhood, preferExistingLinks);
+  const fallback = heuristicResearchPlan(question, neighborhood, preferExistingLinks, spec);
   if (!hasOpenAI()) return fallback;
 
   const OpenAI = (await import("openai")).default;
@@ -570,9 +488,7 @@ function parsePlan(
       ? rec.gaps.map((gap) => String(gap).trim()).filter(Boolean).slice(0, 4)
       : fallback.gaps;
     const parsedFacets = Array.isArray(rec.facets)
-      ? rec.facets
-          .map((item) => String(item).trim().toLowerCase())
-          .filter((item): item is FacetId => FACET_IDS.has(item as FacetId))
+      ? uniqueFacets(rec.facets.map((item) => String(item)))
       : [];
     const parsedJurisdictions = Array.isArray(rec.jurisdictions)
       ? rec.jurisdictions.map((item) => String(item).trim().toUpperCase()).filter(Boolean)

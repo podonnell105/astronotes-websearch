@@ -621,7 +621,8 @@ function buildSearchPrompt(query: string, context: SearchContext): string {
     "Return a JSON object: {\"results\":[{\"title\",\"url\",\"snippet\",\"source\",\"publishedAt\"}]}",
     "publishedAt is YYYY-MM-DD when known; omit it if unknown.",
     "Prefer primary sources (agencies, companies, reputable news, biographies). 8–12 results.",
-    "Skip Facebook, Instagram, TikTok, X/Twitter, Reddit, Pinterest, and URL shorteners.",
+    "Social posts (X, Reddit, Instagram) may be used as discovery signals, not as the only evidence.",
+    "Skip URL shorteners.",
     "Do not write a narrative answer. JSON only.",
   ];
   if (context.policy?.allowDomains.length) {

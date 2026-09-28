@@ -30,7 +30,7 @@ When you mention a graph entity, wrap that mention as [[id|Display Name]] using 
 Cite entities by name. entityIds and relationshipIds must be ids from the graph.
 Include every relationship you used as context in relationshipIds.
 If the graph cannot answer, say so.
-Relationships may have basis recorded, extracted, or inferred. Inferred possible_overlap edges are possible connections with a reasoning chain — never describe them as proof of misconduct, a conflict of interest finding, or wrongdoing.`,
+Relationships may have knowledge fact, derived, inferred, uncertain, or contradicted, and basis recorded, extracted, or inferred. Inferred possible_overlap edges are possible connections with a reasoning chain — never describe them as proof of misconduct, a conflict of interest finding, or wrongdoing. Never treat inferred or uncertain edges as equivalent to facts.`,
     user: JSON.stringify({ question, graph }),
   };
 

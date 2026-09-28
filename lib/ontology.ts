@@ -113,6 +113,8 @@ export function recordedRelationship(input: {
     sourceUrl: input.sourceUrl,
     evidenceSnippet: input.evidenceSnippet,
     basis: "recorded",
+    knowledge: "fact",
+    confidence: 1,
     ...(input.category ? { category: input.category } : {}),
     ...(input.unresolved ? { unresolved: true } : {}),
     ...(input.estimated ? { estimated: true } : {}),
@@ -141,6 +143,8 @@ export function inferredRelationship(input: {
     claim: input.claim,
     status: "unclear",
     basis: "inferred",
+    knowledge: "inferred",
+    confidence: 0.4,
     reasoning: {
       ...input.reasoning,
       disclaimer: input.reasoning.disclaimer || OVERLAP_DISCLAIMER,

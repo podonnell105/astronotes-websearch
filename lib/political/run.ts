@@ -19,12 +19,10 @@ import { lookupUkParliament } from "./uk";
 import { lookupCongress } from "./us";
 import { lookupWikidataPerson } from "./wikidata";
 
-const POLITICAL_SOURCES = new Set<DataSourceId>([
+const POLITICAL_REGISTER_SOURCES = new Set<DataSourceId>([
   "uk_parliament",
   "uk_hansard",
   "uk_interests",
-  "companies_house",
-  "gleif",
   "electoral_commission",
   "contracts_finder",
   "oireachtas",
@@ -33,15 +31,13 @@ const POLITICAL_SOURCES = new Set<DataSourceId>([
   "congress_gov",
   "openfec",
   "senate_lda",
-  "usaspending",
   "europarl",
   "eu_transparency",
   "ted",
 ]);
 
 export function isPoliticalRun(policy: SourcePolicy): boolean {
-  if (policy.role === "political") return true;
-  return policy.dataSources.some((id) => POLITICAL_SOURCES.has(id));
+  return policy.dataSources.some((id) => POLITICAL_REGISTER_SOURCES.has(id));
 }
 
 export async function runPoliticalIngest(input: {
@@ -66,7 +62,7 @@ export async function runPoliticalIngest(input: {
   };
 
   const enabled = new Set(input.policy.dataSources);
-  const want = (id: DataSourceId) => enabled.size === 0 || enabled.has(id) || input.policy.role === "political";
+  const want = (id: DataSourceId) => enabled.has(id);
 
   const parts: PoliticalFragment[] = [wiki];
   const identityTasks: Array<Promise<PoliticalFragment>> = [];

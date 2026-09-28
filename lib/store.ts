@@ -16,7 +16,8 @@ import type {
   Validation,
 } from "./types";
 import { parseEpisodeTime } from "./timeline";
-import { normalizeRelationshipStatus } from "./types";
+import { normalizeKnowledgeState, normalizeRelationshipStatus } from "./types";
+import type { ResearchSpec } from "./research/spec";
 
 export type SessionRecord = {
   id: string;
@@ -37,6 +38,7 @@ export type SessionRecord = {
   chat: ChatTurn[];
   status: "running" | "complete" | "error";
   jevStatus: "jev" | "mock";
+  spec?: ResearchSpec;
 };
 
 type Payload = {
@@ -50,6 +52,7 @@ type Payload = {
   droppedSources?: DroppedSource[];
   events: ResearchEvent[];
   chat: ChatTurn[];
+  spec?: ResearchSpec;
 };
 
 const memory = new Map<string, SessionRecord>();
@@ -148,6 +151,7 @@ export async function persistSession(session: SessionRecord) {
     droppedSources: session.droppedSources,
     events: session.events,
     chat: session.chat,
+    spec: session.spec,
   };
   await mutate((store) => {
     const row = {
@@ -193,6 +197,7 @@ export function toSessionView(session: SessionRecord): SessionView {
     chat: session.chat,
     status: session.status,
     jevStatus: session.jevStatus,
+    spec: session.spec,
     stats: {
       sources: session.sources.length,
       entities: session.entities.size,
@@ -255,6 +260,7 @@ async function loadSession(id: string): Promise<SessionRecord | undefined> {
           ...rel,
           status: normalizeRelationshipStatus(rel.status),
           basis: rel.basis ?? "extracted",
+          knowledge: normalizeKnowledgeState(rel.knowledge),
           time: parseEpisodeTime(rel.time),
         },
       ]),
@@ -274,6 +280,7 @@ async function loadSession(id: string): Promise<SessionRecord | undefined> {
     droppedSources: payload.droppedSources ?? [],
     events: payload.events ?? [],
     chat: payload.chat ?? [],
+    spec: payload.spec,
     status: row.status,
     jevStatus: row.jev_status,
   };

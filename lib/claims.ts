@@ -7,6 +7,7 @@ import type {
   Relationship,
   RelationshipBasis,
   RelationshipStatus,
+  KnowledgeState,
   SearchResult,
   SessionView,
   Validation,
@@ -38,6 +39,7 @@ export type ClaimRow = {
   time?: EpisodeTime;
   when: string;
   basis: RelationshipBasis;
+  knowledge?: KnowledgeState;
   reasoning?: ReasoningChain;
   unresolved?: boolean;
 };
@@ -92,6 +94,7 @@ export function buildClaimRows(view: {
       time: rel.time,
       when: formatEpisodeTime(rel.time),
       basis: normalizeRelationshipBasis(rel.basis),
+      knowledge: rel.knowledge,
       reasoning: rel.reasoning,
       unresolved: rel.unresolved,
     } satisfies ClaimRow;

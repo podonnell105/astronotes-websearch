@@ -18,17 +18,17 @@ const GOVTECH =
 const PE =
   /\b(acquir|acquisition|10-k|edgar|buyout|portfolio company|private equity)\b/i;
 
-export function inferAnalystRole(query: string): Exclude<AnalystRole, "custom"> {
+export function inferAnalystRole(query: string): AnalystRole {
   const facets = detectFacets(query);
-  if (facets.includes("donors") || POLITICAL.test(query)) return "political";
+  if (facets.includes("donations") || POLITICAL.test(query)) return "political";
   if (BIOTECH.test(query)) return "biotech";
   if (facets.includes("funding") || VC.test(query)) return "vc";
   if (GOVTECH.test(query)) return "govtech";
   if (PE.test(query)) return "pe";
-  if (facets.includes("jobs") || facets.includes("hires") || facets.includes("product")) {
+  if (facets.includes("hiring") || facets.includes("employment") || facets.includes("products")) {
     return "pe";
   }
-  return "pe";
+  return "custom";
 }
 
 export function inferQueryPolicy(query: string, base?: SourcePolicy): SourcePolicy {
