@@ -1,4 +1,4 @@
-import { makeEntity, mergeEntity } from "../ontology";
+import { makeEntity, mergeEntity, relationshipId } from "../ontology";
 import type { Entity, Relationship } from "../types";
 import { foldName, nameInText, personNameFromQuery, sameName } from "./names";
 
@@ -31,17 +31,17 @@ export function linkPoliticalGraph(
 
   const byId = new Map(merged.entities.map((entity) => [entity.id, entity]));
   const party = partyFor(subject, byId, merged.relationships);
-  const rewritten = merged.relationships.flatMap((rel) => {
-    if (!MONEY.has(rel.type)) return [rel];
-    const next = retargetMoney(rel, subject, party, byId);
-    return next ? [next] : [];
+  const rewritten = merged.relationships.map((rel) => {
+    if (!MONEY.has(rel.type)) return rel;
+    return retargetMoney(rel, subject, party, byId) ?? rel;
   });
 
   const stitched = stitchToSubject(subject, party, merged.entities, rewritten);
   const kept = keepSubjectComponent(subject.id, merged.entities, stitched);
+  const unique = uniqueGraph(kept.entities, kept.relationships);
   return {
-    entities: kept.entities,
-    relationships: kept.relationships,
+    entities: unique.entities,
+    relationships: unique.relationships,
     subjectName: subject.name,
     partyName: party?.name,
   };
@@ -77,18 +77,11 @@ function mergeSameNames(
     }
   }
 
-  const relationshipsOut: Relationship[] = [];
-  const seen = new Set<string>();
-  for (const rel of relationships) {
-    const source = remap.get(rel.source) ?? rel.source;
-    const target = remap.get(rel.target) ?? rel.target;
-    if (!source || !target) continue;
-    if (source === target && !MONEY.has(rel.type)) continue;
-    if (seen.has(rel.id)) continue;
-    seen.add(rel.id);
-    relationshipsOut.push(source === rel.source && target === rel.target ? rel : { ...rel, source, target });
-  }
-  return { entities: out, relationships: relationshipsOut };
+  const known = new Set(out.map((entity) => entity.id));
+  return {
+    entities: out,
+    relationships: uniqueRelationships(relationships, remap, known),
+  };
 }
 
 function canonicalEntity(group: Entity[]): Entity {
@@ -258,15 +251,12 @@ function stitchToSubject(
   for (const ids of componentIds(entities, relationships)) {
     if (ids.has(subject.id)) continue;
     const members = entities.filter((entity) => ids.has(entity.id));
-    const stranger = members.find(
-      (entity) =>
-        (entity.kind === "person" || entity.type === "person") && !sameName(entity.name, subject.name),
-    );
-    if (stranger) continue;
     const claims = relationships.filter((rel) => ids.has(rel.source) && ids.has(rel.target));
     const text = [...members.map((entity) => entity.name), ...claims.map((rel) => rel.claim)].join(" ");
     const anchor = party && nameInText(party.name, text) && !nameInText(subject.name, text) ? party : subject;
-    const hub = [...members].sort((a, b) => hubScore(b) - hubScore(a))[0];
+    const hub =
+      members.find((entity) => isOrganization(entity)) ??
+      [...members].sort((a, b) => hubScore(b) - hubScore(a))[0];
     if (!hub || hub.id === anchor.id) continue;
     if (extra.some((rel) => rel.source === hub.id && rel.target === anchor.id)) continue;
     extra.push({
@@ -338,4 +328,41 @@ function keepSubjectComponent(
     entities: entities.filter((entity) => keep.has(entity.id)),
     relationships: live.filter((rel) => keep.has(rel.source) && keep.has(rel.target)),
   };
+}
+
+function uniqueGraph(
+  entities: Entity[],
+  relationships: Relationship[],
+): { entities: Entity[]; relationships: Relationship[] } {
+  const byId = new Map<string, Entity>();
+  for (const entity of entities) {
+    if (!entity.id || byId.has(entity.id)) continue;
+    byId.set(entity.id, entity);
+  }
+  return {
+    entities: [...byId.values()],
+    relationships: uniqueRelationships(relationships, new Map(), byId),
+  };
+}
+
+function uniqueRelationships(
+  relationships: Relationship[],
+  remap: Map<string, string>,
+  known: Map<string, Entity> | Set<string>,
+): Relationship[] {
+  const has = (id: string) => known.has(id);
+  const seen = new Set<string>();
+  const out: Relationship[] = [];
+  for (const rel of relationships) {
+    const source = remap.get(rel.source) ?? rel.source;
+    const target = remap.get(rel.target) ?? rel.target;
+    if (!source || !target || !has(source) || !has(target)) continue;
+    if (source === target && !MONEY.has(rel.type)) continue;
+    const extra = rel.id.split("__").slice(3).join("__");
+    const id = relationshipId(source, rel.type, target, extra || undefined);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(source === rel.source && target === rel.target && id === rel.id ? rel : { ...rel, id, source, target });
+  }
+  return out;
 }

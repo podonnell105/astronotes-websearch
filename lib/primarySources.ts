@@ -1,4 +1,4 @@
-import { dataSourceAvailability } from "./config";
+import { companiesHouseSkipReason, dataSourceAvailability } from "./config";
 import { DATA_CATALOG, isCatalogHost, type DataSourceId } from "./dataCatalog";
 import { lookupEdgarFilings } from "./edgar";
 import { lookupGithub } from "./github";
@@ -117,7 +117,11 @@ export async function fetchPrimaryRecords(input: {
   for (const id of enabled) {
     const def = DATA_CATALOG.find((item) => item.id === id);
     if (def?.needsEnv && !availability[id]) {
-      skipped.push(SKIP_LABEL[def.needsEnv] ?? `${def.label} skipped (no API key)`);
+      skipped.push(
+        def.needsEnv === "COMPANIES_HOUSE_API_KEY"
+          ? companiesHouseSkipReason()
+          : (SKIP_LABEL[def.needsEnv] ?? `${def.label} skipped (no API key)`),
+      );
       continue;
     }
     runnable.push(id);

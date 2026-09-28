@@ -27,6 +27,22 @@ export function hasJev(): boolean {
   return Boolean(getJevApiKey());
 }
 
+const OAUTH_CLIENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function companiesHouseApiKey(): string | undefined {
+  const key = process.env.COMPANIES_HOUSE_API_KEY?.trim();
+  if (!key || OAUTH_CLIENT_ID.test(key)) return undefined;
+  return key;
+}
+
+export function companiesHouseSkipReason(): string {
+  const raw = process.env.COMPANIES_HOUSE_API_KEY?.trim();
+  if (raw && OAUTH_CLIENT_ID.test(raw)) {
+    return "Companies House skipped (need a REST API key, not a web OAuth client)";
+  }
+  return "Companies House skipped (no API key)";
+}
+
 export function detectRuntime(): {
   mode: RuntimeMode;
   search: SearchProvider;
@@ -53,7 +69,7 @@ export function nowStamp(): string {
 }
 
 export function dataSourceAvailability(): Record<DataSourceId, boolean> {
-  const companiesHouse = Boolean(process.env.COMPANIES_HOUSE_API_KEY?.trim());
+  const companiesHouse = Boolean(companiesHouseApiKey());
   const patents = Boolean(process.env.PATENTSVIEW_API_KEY?.trim());
   const sam = Boolean(process.env.SAM_API_KEY?.trim());
   const sanctions = Boolean(process.env.OPENSANCTIONS_API_KEY?.trim());

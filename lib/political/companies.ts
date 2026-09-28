@@ -6,6 +6,7 @@ import {
 } from "../ontology";
 import { sectorFromSic } from "./sectors";
 import { politicalGetJson } from "./http";
+import { companiesHouseApiKey, companiesHouseSkipReason } from "../config";
 import type { PoliticalFragment } from "./types";
 import { emptyFragment, mergeFragments } from "./types";
 
@@ -22,9 +23,9 @@ export async function lookupCompanyAssertions(names: string[]): Promise<Politica
 }
 
 export async function lookupCompaniesHouseAssertions(names: string[]): Promise<PoliticalFragment> {
-  const apiKey = process.env.COMPANIES_HOUSE_API_KEY?.trim();
+  const apiKey = companiesHouseApiKey();
   if (!apiKey) {
-    return { ...emptyFragment(), skipped: ["Companies House skipped (no API key)"] };
+    return { ...emptyFragment(), skipped: [companiesHouseSkipReason()] };
   }
   const auth = Buffer.from(`${apiKey}:`).toString("base64");
   const parts: PoliticalFragment[] = [];
