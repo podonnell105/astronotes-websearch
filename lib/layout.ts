@@ -32,29 +32,15 @@ export function layoutGraph(nodes: Node[], edges: Edge[], direction: "LR" | "TB"
   for (const node of nodes) {
     graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
   }
-  const nodeIds = new Set(nodes.map((node) => node.id));
-  const liveEdges = edges.filter(
-    (edge) => edge.source && edge.target && edge.source !== edge.target && nodeIds.has(edge.source) && nodeIds.has(edge.target),
-  );
-  for (const edge of liveEdges) {
+  for (const edge of edges) {
     graph.setEdge(edge.source, edge.target, {}, edge.id);
   }
 
-  try {
-    layout(graph);
-  } catch {
-    return fallbackLayout(nodes, direction);
-  }
+  layout(graph);
 
   const placed = nodes.map((node) => {
     const spot = graph.node(node.id);
-    if (!spot || !Number.isFinite(spot.x) || !Number.isFinite(spot.y)) {
-      return {
-        ...node,
-        sourcePosition: direction === "LR" ? Position.Right : Position.Bottom,
-        targetPosition: direction === "LR" ? Position.Left : Position.Top,
-      } as Node;
-    }
+    if (!spot) return node;
     return {
       ...node,
       position: {
@@ -65,20 +51,7 @@ export function layoutGraph(nodes: Node[], edges: Edge[], direction: "LR" | "TB"
       targetPosition: direction === "LR" ? Position.Left : Position.Top,
     } as Node;
   });
-  return packComponents(placed, liveEdges);
-}
-
-function fallbackLayout(nodes: Node[], direction: "LR" | "TB"): Node[] {
-  const cols = Math.max(1, Math.ceil(Math.sqrt(nodes.length)));
-  return nodes.map((node, index) => ({
-    ...node,
-    position: {
-      x: (index % cols) * (NODE_WIDTH + 44),
-      y: Math.floor(index / cols) * (NODE_HEIGHT + 96),
-    },
-    sourcePosition: direction === "LR" ? Position.Right : Position.Bottom,
-    targetPosition: direction === "LR" ? Position.Left : Position.Top,
-  }));
+  return packComponents(placed, edges);
 }
 
 const COMPONENT_GAP = 72;

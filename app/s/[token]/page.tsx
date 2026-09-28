@@ -12,5 +12,5 @@ export default async function SharePage({
   const { token } = await params;
   const view = await getShare(token);
   if (!view) notFound();
-  return <ResearchWorkspace key={token} initialSession={view} readOnly />;
+  return <ResearchWorkspace initialSession={view} readOnly />;
 }

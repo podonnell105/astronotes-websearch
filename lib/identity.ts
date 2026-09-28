@@ -1,5 +1,4 @@
 import type { Document } from "./search";
-import { companiesHouseApiKey } from "./config";
 
 const GLEIF_URL = "https://api.gleif.org/api/v1/lei-records";
 const COMPANIES_HOUSE_URL = "https://api.company-information.service.gov.uk/search/companies";
@@ -82,7 +81,7 @@ export async function lookupGleif(names: string[]): Promise<Document[]> {
 }
 
 export async function lookupCompaniesHouse(names: string[]): Promise<Document[]> {
-  const apiKey = companiesHouseApiKey();
+  const apiKey = process.env.COMPANIES_HOUSE_API_KEY?.trim();
   if (!apiKey) return [];
 
   const found: Document[] = [];

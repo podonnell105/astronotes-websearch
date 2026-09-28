@@ -851,7 +851,6 @@ export function ResearchWorkspace({
                     </div>
                   )}
                   <KnowledgeGraph
-                    resetKey={sessionId}
                     entities={entities}
                     relationships={relationships}
                     validations={validations}

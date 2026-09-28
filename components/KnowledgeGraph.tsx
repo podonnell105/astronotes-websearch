@@ -31,7 +31,7 @@ import {
   type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
 type EntityData = {
   name: string;
@@ -201,7 +201,6 @@ function GraphInner({
   const { fitView } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<EntityData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const [readyKey, setReadyKey] = useState("");
 
   const neighborhood = useMemo(() => {
     if (!expanded || !selectedEntityId) return null;
@@ -223,45 +222,26 @@ function GraphInner({
   const structureKey = `${entities.map((e) => e.id).join(",")}|${relationships.map((r) => r.id).join(",")}`;
 
   useEffect(() => {
-    const seenNodes = new Set<string>();
-    const rawNodes: Node<EntityData>[] = [];
-    for (const entity of entities) {
-      if (!entity.id || seenNodes.has(entity.id)) continue;
-      seenNodes.add(entity.id);
-      rawNodes.push({
-        id: entity.id,
-        type: "entity",
-        position: { x: 0, y: 0 },
-        data: {
-          name: entity.name,
-          entityType: entity.type,
-          dimmed: false,
-          highlighted: false,
-        },
-      });
-    }
-    const seenEdges = new Set<string>();
-    const rawEdges: Edge[] = [];
-    for (const rel of relationships) {
-      if (!rel.id || seenEdges.has(rel.id)) continue;
-      if (!seenNodes.has(rel.source) || !seenNodes.has(rel.target)) continue;
-      if (rel.source === rel.target) continue;
-      seenEdges.add(rel.id);
-      rawEdges.push({
-        id: rel.id,
-        source: rel.source,
-        target: rel.target,
-        type: "audit",
-        label: rel.time ? `${rel.type} ${formatEpisodeTime(rel.time)}` : rel.type,
-        data: { basis: rel.basis ?? "extracted" },
-      });
-    }
-    let placed: Node<EntityData>[] = rawNodes;
-    try {
-      placed = layoutGraph(rawNodes, rawEdges, "TB") as Node<EntityData>[];
-    } catch {
-      placed = rawNodes;
-    }
+    const rawNodes: Node<EntityData>[] = entities.map((entity) => ({
+      id: entity.id,
+      type: "entity",
+      position: { x: 0, y: 0 },
+      data: {
+        name: entity.name,
+        entityType: entity.type,
+        dimmed: false,
+        highlighted: false,
+      },
+    }));
+    const rawEdges: Edge[] = relationships.map((rel) => ({
+      id: rel.id,
+      source: rel.source,
+      target: rel.target,
+      type: "audit",
+      label: rel.time ? `${rel.type} ${formatEpisodeTime(rel.time)}` : rel.type,
+      data: { basis: rel.basis ?? "extracted" },
+    }));
+    const placed = layoutGraph(rawNodes, rawEdges, "TB") as Node<EntityData>[];
     const lanes = edgeLanes(placed, rawEdges);
     setNodes(placed);
     setEdges(
@@ -270,34 +250,31 @@ function GraphInner({
         data: lanes.get(edge.id) ?? { sourceShift: 0, targetShift: 0, stepPosition: 0.5 },
       })),
     );
-    setReadyKey(structureKey);
-    const t = window.setTimeout(() => fitView({ padding: 0.24, duration: 0 }), 50);
+    const t = window.setTimeout(() => fitView({ padding: 0.24, duration: 320 }), 50);
     return () => window.clearTimeout(t);
   }, [structureKey, entities, relationships, setNodes, setEdges, fitView]);
 
   useEffect(() => {
     setNodes((current) =>
-      current
-        .filter((node) => entities.some((entity) => entity.id === node.id))
-        .map((node) => {
-          const entity = entities.find((e) => e.id === node.id);
-          if (!entity) return node;
-          return {
-            ...node,
-            selected: selectedEntityId === node.id,
-            data: {
-              name: entity.name,
-              entityType: entity.type,
-              dimmed: neighborhood ? !neighborhood.has(node.id) : false,
-              highlighted: selectedEntityId ? false : highlight.has(node.id),
-            },
-          };
-        }),
+      current.map((node) => {
+        const entity = entities.find((e) => e.id === node.id);
+        if (!entity) return node;
+        return {
+          ...node,
+          selected: selectedEntityId === node.id,
+          data: {
+            name: entity.name,
+            entityType: entity.type,
+            dimmed: neighborhood ? !neighborhood.has(node.id) : false,
+            highlighted: selectedEntityId
+              ? false
+              : highlight.has(node.id),
+          },
+        };
+      }),
     );
     setEdges((current) =>
-      current
-        .filter((edge) => relationships.some((item) => item.id === edge.id))
-        .map((edge) => {
+      current.map((edge) => {
         const validation = validations[edge.id];
         const inNeighborhood =
           !neighborhood ||
@@ -357,12 +334,6 @@ function GraphInner({
     [onEdgesChange],
   );
 
-  const pendingLayout =
-    entities.length > 0 &&
-    (nodes.length === 0 ||
-      (readyKey !== structureKey &&
-        !entities.some((entity) => nodes.some((node) => node.id === entity.id))));
-
   return (
     <div className="flex h-full min-h-0 flex-col">
       {chromeOpen && (
@@ -389,10 +360,7 @@ function GraphInner({
           </div>
         </div>
       )}
-      <div
-        className="relative min-h-0 flex-1"
-        style={{ visibility: pendingLayout ? "hidden" : "visible" }}
-      >
+      <div className="relative min-h-0 flex-1">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -427,7 +395,7 @@ function GraphInner({
         </ReactFlow>
       </div>
       <TimelineStrip
-        relationships={pendingLayout ? [] : relationships}
+        relationships={relationships}
         selectedRelationshipId={selectedRelationshipId}
         focusedRelationshipIds={focusedRelationshipIds}
         onSelect={onSelectRelationship}
@@ -447,13 +415,7 @@ function TimelineStrip({
   focusedRelationshipIds: string[];
   onSelect: (id: string | null) => void;
 }) {
-  const timeline = useMemo(() => {
-    try {
-      return buildTimeline(relationships);
-    } catch {
-      return null;
-    }
-  }, [relationships]);
+  const timeline = useMemo(() => buildTimeline(relationships), [relationships]);
   const cited = useMemo(
     () => new Set(focusedRelationshipIds),
     [focusedRelationshipIds],
@@ -532,11 +494,10 @@ export function KnowledgeGraph(props: {
   onResetSelection: () => void;
   chromeOpen?: boolean;
   onToggleChrome?: () => void;
-  resetKey?: string | null;
 }) {
   return (
     <div className="h-full min-h-0 w-full">
-      <ReactFlowProvider key={props.resetKey ?? "graph"}>
+      <ReactFlowProvider>
         <GraphInner {...props} />
       </ReactFlowProvider>
     </div>

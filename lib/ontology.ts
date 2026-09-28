@@ -1,4 +1,3 @@
-import { parseEpisodeTime } from "./timeline";
 import type {
   Entity,
   EntityIdentifier,
@@ -103,7 +102,6 @@ export function recordedRelationship(input: {
   time?: Relationship["time"];
   provenance: Provenance;
 }): Relationship {
-  const time = parseEpisodeTime(input.time);
   return {
     id: relationshipId(input.source, input.type, input.target, input.extraId),
     source: input.source,
@@ -117,7 +115,7 @@ export function recordedRelationship(input: {
     ...(input.category ? { category: input.category } : {}),
     ...(input.unresolved ? { unresolved: true } : {}),
     ...(input.estimated ? { estimated: true } : {}),
-    ...(time ? { time } : {}),
+    ...(input.time ? { time: input.time } : {}),
     provenance: {
       ...input.provenance,
       fetchedAt: input.provenance.fetchedAt ?? new Date().toISOString(),

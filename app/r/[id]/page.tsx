@@ -32,7 +32,6 @@ export default async function ResearchPage({
     const query = await searchParams;
     return (
       <ResearchWorkspace
-        key="new"
         user={user}
         stripeEnabled={stripeEnabled()}
         autoStart
@@ -52,7 +51,6 @@ export default async function ResearchPage({
   if (!initialSession) notFound();
   return (
     <ResearchWorkspace
-      key={id}
       user={user}
       stripeEnabled={stripeEnabled()}
       initialSession={initialSession}
