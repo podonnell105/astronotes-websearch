@@ -1,12 +1,14 @@
 "use client";
 
 import {
+  basisCounts,
   buildClaimRows,
   claimAuditSummary,
   decisionCounts,
   filterClaimRows,
   formatPublished,
   statusCounts,
+  type BasisFilter,
   type DecisionFilter,
   type StatusFilter,
 } from "@/lib/claims";
@@ -29,6 +31,7 @@ const FILTERS: DecisionFilter[] = [
 ];
 
 const STATUSES: StatusFilter[] = ["ALL", "deployed", "announced", "unclear"];
+const BASES: BasisFilter[] = ["ALL", "recorded", "extracted", "inferred"];
 
 export function ClaimTable({
   entities,
@@ -53,6 +56,7 @@ export function ClaimTable({
 }) {
   const [filter, setFilter] = useState<DecisionFilter>("ALL");
   const [status, setStatus] = useState<StatusFilter>("ALL");
+  const [basis, setBasis] = useState<BasisFilter>("ALL");
   const rows = useMemo(
     () =>
       buildClaimRows({
@@ -66,8 +70,9 @@ export function ClaimTable({
   );
   const counts = decisionCounts(rows);
   const statuses = statusCounts(rows);
+  const bases = basisCounts(rows);
   const audit = claimAuditSummary(counts);
-  const visible = filterClaimRows(rows, filter, status);
+  const visible = filterClaimRows(rows, filter, status, basis);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas">
@@ -137,6 +142,32 @@ export function ClaimTable({
             );
           })}
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {BASES.map((item) => {
+            const count =
+              item === "ALL"
+                ? rows.length
+                : item === "recorded"
+                  ? bases.recorded
+                  : item === "extracted"
+                    ? bases.extracted
+                    : bases.inferred;
+            return (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setBasis(item)}
+                className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ${
+                  basis === item
+                    ? "border-line-strong text-ink"
+                    : "border-line text-muted hover:text-ink"
+                }`}
+              >
+                {item === "ALL" ? "All basis" : item} {count}
+              </button>
+            );
+          })}
+        </div>
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
           {audit.line}
         </div>
@@ -153,6 +184,7 @@ export function ClaimTable({
             <thead>
               <tr>
                 <th>Decision</th>
+                <th>Basis</th>
                 <th>Status</th>
                 <th>When</th>
                 <th>Actors</th>
@@ -174,10 +206,21 @@ export function ClaimTable({
                         {row.decision}
                       </div>
                       <div className="mt-1 font-mono text-[10px] text-dim">
-                        {row.model === "jev" ? "Jev" : "Mock"}
+                        {row.model === "jev"
+                          ? "Jev"
+                          : row.model === "register"
+                            ? "Register"
+                            : row.model === "rule"
+                              ? "Rule"
+                              : "Mock"}
                         {row.confidence != null
                           ? ` ${Math.round(row.confidence * 100)}%`
                           : ""}
+                      </div>
+                    </td>
+                    <td>
+                      <div className={`claim-basis claim-basis--${row.basis}`}>
+                        {row.basis}
                       </div>
                     </td>
                     <td>
@@ -202,6 +245,16 @@ export function ClaimTable({
                       <div className="mt-1 line-clamp-2 text-[11px] text-dim">
                         “{row.snippet}”
                       </div>
+                      {row.basis === "inferred" && row.reasoning && (
+                        <ol className="mt-2 space-y-1 text-[11px] text-muted">
+                          {row.reasoning.steps.map((step) => (
+                            <li key={step.order}>
+                              {step.order}. {step.text}
+                            </li>
+                          ))}
+                          <li className="text-dim">{row.reasoning.disclaimer}</li>
+                        </ol>
+                      )}
                     </td>
                     <td>
                       {row.url ? (

@@ -51,17 +51,30 @@ export function EvidencePanel({
         </div>
 
         <div className="mt-8 space-y-5">
+          <Meta label="Basis" value={relationship.basis ?? "extracted"} />
           <Meta
             label="Jev decision"
-            value={validation?.decision ?? "PENDING"}
+            value={validation?.decision ?? (relationship.basis === "recorded" ? "SUPPORTED" : "PENDING")}
           />
           {typeof validation?.confidence === "number" && (
             <Meta label="Jev confidence" value={formatPct(validation.confidence)} />
           )}
           <Meta
             label="Validator"
-            value={validation?.model === "jev" ? "Jev (live)" : "Mock / demo"}
-            tone={validation?.model === "jev" ? "live" : "warn"}
+            value={
+              validation?.model === "jev"
+                ? "Jev (live)"
+                : validation?.model === "register"
+                  ? "Register record"
+                  : validation?.model === "rule"
+                    ? "Named inference rule"
+                    : "Mock / demo"
+            }
+            tone={
+              validation?.model === "jev" || validation?.model === "register"
+                ? "live"
+                : "warn"
+            }
           />
           <Meta label="Status" value={relationship.status} />
         </div>
@@ -101,6 +114,22 @@ export function EvidencePanel({
             ))}
           </ol>
         </section>
+
+        {relationship.basis === "inferred" && relationship.reasoning && (
+          <section className="mt-8">
+            <div className="label mb-3">Reasoning</div>
+            <ol className="space-y-2 text-[13px] leading-6 text-muted">
+              {relationship.reasoning.steps.map((step) => (
+                <li key={step.order}>
+                  {step.order}. {step.text}
+                </li>
+              ))}
+            </ol>
+            <p className="mt-3 text-[13px] leading-6 text-dim">
+              {relationship.reasoning.disclaimer}
+            </p>
+          </section>
+        )}
       </div>
     </aside>
   );

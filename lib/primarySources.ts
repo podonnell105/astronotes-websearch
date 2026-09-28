@@ -23,6 +23,7 @@ const SKIP_LABEL: Record<string, string> = {
   PATENTSVIEW_API_KEY: "PatentsView skipped (no API key)",
   SAM_API_KEY: "SAM.gov skipped (no API key)",
   OPENSANCTIONS_API_KEY: "OpenSanctions skipped (no API key)",
+  CONGRESS_GOV_API_KEY: "Congress.gov skipped (no API key)",
 };
 
 const AGENCY_SKIP = new Set([
@@ -74,7 +75,7 @@ export type PrimarySourceOutcome = {
 
 type Lookup = (names: string[], excludeUrls: string[]) => Promise<Document[]>;
 
-const LOOKUPS: Record<DataSourceId, Lookup> = {
+const LOOKUPS: Partial<Record<DataSourceId, Lookup>> = {
   edgar: (names, exclude) => lookupEdgarFilings(names, exclude),
   usaspending: (names, exclude) => lookupUsaSpendingAwards(names, exclude),
   gleif: (names) => lookupGleif(names),
@@ -126,7 +127,9 @@ export async function fetchPrimaryRecords(input: {
   const batches = await Promise.all(
     runnable.map(async (id) => {
       try {
-        const docs = await LOOKUPS[id](names, excludeUrls);
+        const lookup = LOOKUPS[id];
+        if (!lookup) return [] as Document[];
+        const docs = await lookup(names, excludeUrls);
         return docs.slice(0, PER_SOURCE);
       } catch {
         return [] as Document[];

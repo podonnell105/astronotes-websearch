@@ -73,7 +73,7 @@ export async function lookupGleif(names: string[]): Promise<Document[]> {
         url,
         snippet,
         source: "gleif.org",
-        text: `${snippet} Use LEI and parent LEI to keep legal entities distinct in the graph.`,
+        text: `${snippet} Use LEI and parent LEI to keep legal entities distinct in the graph. Officers, PSCs, and SIC codes belong on the company number or LEI, not a similarly named affiliate.`,
       });
     }
   }
@@ -106,10 +106,18 @@ export async function lookupCompaniesHouse(names: string[]): Promise<Document[]>
       if (!number) continue;
       const title = item.title || name;
       const url = `https://find-and-update.company-information.service.gov.uk/company/${number}`;
+      const profile = await getJson<{ sic_codes?: string[]; company_status?: string }>(
+        `https://api.company-information.service.gov.uk/company/${number}`,
+        {
+          Accept: "application/json",
+          Authorization: `Basic ${auth}`,
+        },
+      );
       const snippet = [
         `Companies House ${number} — ${title}.`,
         item.company_status ? `Status ${item.company_status}.` : "",
         item.company_type ? `Type ${item.company_type}.` : "",
+        (profile?.sic_codes ?? []).length ? `SIC ${(profile?.sic_codes ?? []).join(", ")}.` : "",
         item.address_snippet || "",
         item.date_of_creation ? `Incorporated ${item.date_of_creation}.` : "",
       ]
@@ -121,7 +129,7 @@ export async function lookupCompaniesHouse(names: string[]): Promise<Document[]>
         snippet,
         source: "companieshouse.gov.uk",
         publishedAt: item.date_of_creation,
-        text: `${snippet} Officers and PSCs belong on this company number, not a similarly named affiliate.`,
+        text: `${snippet} Officers, persons with significant control, and SIC codes belong on this company number, not a similarly named affiliate.`,
       });
     }
   }

@@ -38,6 +38,7 @@ export function buildPackMarkdown(view: SessionView): string {
     `Status: deployed ${statuses.deployed} · announced ${statuses.announced} · unclear ${statuses.unclear}`,
     audit.line,
     ...(audit.warning ? [audit.warning] : []),
+    `Recorded facts and extracted claims are listed separately from inferred overlaps. Inferred overlaps are possible connections, not findings.`,
     `Source policy: ${formatSourcePolicy(view.sourcePolicy)}`,
     ...primaryCoverLines(view.sources),
     ``,
@@ -63,9 +64,9 @@ export function buildPackMarkdown(view: SessionView): string {
       continue;
     }
     lines.push(
-      `| Decision | When | ${esc("Actor")} | Relation | ${esc("Actor")} | Claim | Confidence | Validator | Sources | Published |`,
+      `| Decision | Basis | When | ${esc("Actor")} | Relation | ${esc("Actor")} | Claim | Confidence | Validator | Sources | Published |`,
     );
-    lines.push(`| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |`);
+    lines.push(`| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |`);
     for (const row of section) lines.push(markdownRow(row));
     lines.push("");
   }
@@ -85,6 +86,22 @@ export function buildPackMarkdown(view: SessionView): string {
     }
   }
 
+  const inferred = rows.filter((row) => row.basis === "inferred");
+  if (inferred.length > 0) {
+    lines.push("", `## Possible overlaps`, ``);
+    lines.push("These are inferred from recorded facts. They are not proof of misconduct.");
+    lines.push("");
+    for (const row of inferred) {
+      lines.push(`- ${row.sourceName} → ${row.targetName}: ${row.claim}`);
+      if (row.reasoning) {
+        for (const step of row.reasoning.steps) {
+          lines.push(`  ${step.order}. ${step.text}`);
+        }
+        lines.push(`  ${row.reasoning.disclaimer}`);
+      }
+    }
+  }
+
   return lines.join("\n");
 }
 
@@ -100,10 +117,12 @@ export function buildPackCsv(view: SessionView): string {
     "claim",
     "confidence",
     "validator",
+    "basis",
     "snippet",
     "url",
     "extraUrls",
     "publishedAt",
+    "reasoning",
   ];
   const body = rows.map((row) =>
     [
@@ -116,10 +135,14 @@ export function buildPackCsv(view: SessionView): string {
       row.claim,
       row.confidence == null ? "" : String(Math.round(row.confidence * 100) / 100),
       row.model,
+      row.basis,
       row.snippet,
       row.url ?? "",
       row.extraUrls.join(" "),
       row.publishedAt ?? "",
+      row.reasoning
+        ? `${row.reasoning.ruleId}: ${row.reasoning.steps.map((step) => step.text).join(" ")} ${row.reasoning.disclaimer}`
+        : "",
     ]
       .map(csvCell)
       .join(","),
@@ -131,7 +154,7 @@ function markdownRow(row: ClaimRow): string {
   const confidence =
     row.confidence == null ? "" : `${Math.round(row.confidence * 100)}%`;
   const urls = [row.url, ...row.extraUrls].filter(Boolean).join(" ");
-  return `| ${row.decision} | ${esc(row.when || "—")} | ${esc(row.sourceName)} | ${esc(row.type)} | ${esc(row.targetName)} | ${esc(row.claim)} | ${confidence} | ${row.model} | ${esc(urls)} | ${formatPublished(row.publishedAt)} |`;
+  return `| ${row.decision} | ${esc(row.basis)} | ${esc(row.when || "—")} | ${esc(row.sourceName)} | ${esc(row.type)} | ${esc(row.targetName)} | ${esc(row.claim)} | ${confidence} | ${row.model} | ${esc(urls)} | ${formatPublished(row.publishedAt)} |`;
 }
 
 function primaryCoverLines(sources: SessionView["sources"]): string[] {

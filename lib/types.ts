@@ -6,6 +6,9 @@ export const ENTITY_TYPES = [
   "person",
   "organization",
   "company",
+  "office",
+  "legislation",
+  "sector",
   "technology",
   "mission",
   "location",
@@ -17,10 +20,85 @@ export const ENTITY_TYPES = [
   "process",
 ] as const;
 
+export const ENTITY_KINDS = [
+  "person",
+  "organization",
+  "company",
+  "office",
+  "legislation",
+  "sector",
+] as const;
+
+export type EntityKind = (typeof ENTITY_KINDS)[number];
+
+export type EntityIdentifier = {
+  scheme: string;
+  value: string;
+};
+
+export const RELATIONSHIP_BASES = ["recorded", "extracted", "inferred"] as const;
+export type RelationshipBasis = (typeof RELATIONSHIP_BASES)[number];
+
+export const POLITICAL_PREDICATES = [
+  "holds_office",
+  "member_of",
+  "declared_interest",
+  "officer_of",
+  "psc_of",
+  "parent_of",
+  "donated_to",
+  "lobbied_on",
+  "sponsored",
+  "voted_on",
+  "spoke_on",
+  "questioned",
+  "awarded_contract",
+  "classified_as",
+  "same_as",
+  "possible_overlap",
+] as const;
+
+export type PoliticalPredicate = (typeof POLITICAL_PREDICATES)[number];
+
+export const INTEREST_CATEGORIES = [
+  "employment",
+  "shareholding",
+  "directorship",
+  "gift",
+  "visit",
+  "other",
+] as const;
+
+export type InterestCategory = (typeof INTEREST_CATEGORIES)[number];
+
+export type Provenance = {
+  sourceId?: string;
+  recordUrl?: string;
+  externalId?: string;
+  fieldPath?: string;
+  fetchedAt?: string;
+};
+
+export type ReasoningStep = {
+  order: number;
+  relationshipId: string;
+  text: string;
+};
+
+export type ReasoningChain = {
+  ruleId: string;
+  premiseIds: string[];
+  steps: ReasoningStep[];
+  disclaimer: string;
+};
+
 const ENTITY_TYPE_CHIPS: Record<string, string> = {
   person: "PER",
   organization: "ORG",
   company: "CO",
+  office: "OFF",
+  legislation: "BILL",
+  sector: "SEC",
   technology: "TECH",
   mission: "MSN",
   location: "LOC",
@@ -50,6 +128,16 @@ const TYPE_ALIASES: Record<string, string> = {
   services: "service",
   events: "event",
   processes: "process",
+  politician: "person",
+  mp: "person",
+  mla: "person",
+  mep: "person",
+  senator: "person",
+  bill: "legislation",
+  act: "legislation",
+  statute: "legislation",
+  industry: "sector",
+  post: "office",
 };
 
 export function normalizeEntityType(value: unknown): EntityType {
@@ -108,6 +196,9 @@ export type Entity = {
   id: string;
   name: string;
   type: EntityType;
+  kind?: EntityKind;
+  identifiers?: EntityIdentifier[];
+  jurisdiction?: string;
 };
 
 export type RelationshipStatus = "deployed" | "announced" | "unclear";
@@ -128,7 +219,19 @@ export type Relationship = {
   sourceUrl?: string;
   evidenceSnippet?: string;
   time?: EpisodeTime;
+  basis?: RelationshipBasis;
+  category?: InterestCategory | string;
+  estimated?: boolean;
+  unresolved?: boolean;
+  reasoning?: ReasoningChain;
+  provenance?: Provenance;
 };
+
+export function normalizeRelationshipBasis(value: unknown): RelationshipBasis {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "recorded" || raw === "extracted" || raw === "inferred") return raw;
+  return "extracted";
+}
 
 export function normalizeRelationshipStatus(value: unknown): RelationshipStatus {
   const raw = String(value ?? "").trim().toLowerCase();
@@ -138,10 +241,24 @@ export function normalizeRelationshipStatus(value: unknown): RelationshipStatus 
 
 export type ValidationDecision = "SUPPORTED" | "CONTRADICTED" | "UNCERTAIN";
 
+export function normalizeEntityKind(value: unknown, type?: string): EntityKind | undefined {
+  const raw = String(value ?? type ?? "")
+    .trim()
+    .toLowerCase();
+  if ((ENTITY_KINDS as readonly string[]).includes(raw)) return raw as EntityKind;
+  if (raw === "organisation" || raw === "org") return "organization";
+  if (raw === "bill" || raw === "act" || raw === "statute") return "legislation";
+  if (raw === "industry") return "sector";
+  if (raw === "post" || raw === "seat") return "office";
+  return undefined;
+}
+
+export type ValidatorModel = "jev" | "mock" | "register" | "rule";
+
 export type Validation = {
   decision: string;
   confidence?: number;
-  model: "jev" | "mock";
+  model: ValidatorModel;
   probabilities?: Record<string, number>;
   jevModelVersion?: string;
 };

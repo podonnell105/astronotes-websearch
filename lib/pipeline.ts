@@ -11,8 +11,10 @@ import {
   type Extraction,
 } from "./extraction";
 import { addEntity, addRelationship } from "./graph";
+import { mergeEntity } from "./ontology";
 import { classifyClaims, toValidation } from "./jev";
 import { fetchPrimaryRecords, harvestOrgNames } from "./primarySources";
+import { isPoliticalRun, runPoliticalIngest, applyPoliticalFragment } from "./political/run";
 import { filterRelevantResults } from "./relevance";
 import {
   fetchRelevantPages,
@@ -98,9 +100,9 @@ export async function runResearch(
   emit(modeEvent);
 
   try {
-    const existingEntities = [...session.entities.values()];
-    const existingRelationships = [...session.relationships.values()];
-    const knownEntities = rankKnownEntities(
+    let existingEntities = [...session.entities.values()];
+    let existingRelationships = [...session.relationships.values()];
+    let knownEntities = rankKnownEntities(
       nextQuery,
       existingEntities.map((entity) => ({
         id: entity.id,
@@ -108,6 +110,37 @@ export async function runResearch(
         type: entity.type,
       })),
     );
+
+    if (isPoliticalRun(policy)) {
+      log(emit, session, "Looking up political registers...");
+      const fragment = await runPoliticalIngest({
+        query: nextQuery,
+        policy,
+        existing: existingEntities,
+      });
+      for (const message of fragment.skipped) log(emit, session, message);
+      const politicalEmit: Emit = (event) => {
+        rememberEvent(session, event);
+        emit(event);
+      };
+      applyPoliticalFragment(session, fragment, politicalEmit);
+      log(
+        emit,
+        session,
+        `Recorded ${fragment.relationships.filter((rel) => rel.basis === "recorded").length} register facts · ${fragment.relationships.filter((rel) => rel.basis === "inferred").length} possible overlaps`,
+      );
+      stats(emit, session);
+      existingEntities = [...session.entities.values()];
+      existingRelationships = [...session.relationships.values()];
+      knownEntities = rankKnownEntities(
+        nextQuery,
+        existingEntities.map((entity) => ({
+          id: entity.id,
+          name: entity.name,
+          type: entity.type,
+        })),
+      );
+    }
 
     let allowNewEntities = !preferExistingLinks;
     let gaps: string[] = [];
@@ -324,6 +357,11 @@ export async function runResearch(
         session,
         `Entity match ${merge.from} → ${merge.into}  ${merge.decision} (${merge.model})`,
       );
+      const from = extracted.entities.find((entity) => entity.id === merge.from);
+      const into = session.entities.get(merge.into);
+      if (from && into) {
+        session.entities.set(into.id, mergeEntity(into, { ...from, id: into.id }));
+      }
     }
 
     for (const entity of resolved.entities) {
@@ -348,12 +386,14 @@ export async function runResearch(
         id: `${source}__${rel.type}__${target}`,
         source,
         target,
+        basis: rel.basis ?? "extracted",
       });
     }
 
     const uniqueRels = dedupeRelationships(remapped).filter(
       (rel) => !session.relationships.has(rel.id),
     );
+    const toValidate = uniqueRels.filter((rel) => (rel.basis ?? "extracted") === "extracted");
     log(emit, session, `Extracted ${uniqueRels.length} candidate claims`);
 
     for (const relationship of uniqueRels) {
@@ -370,6 +410,11 @@ export async function runResearch(
       return complete(session, emit);
     }
 
+    if (toValidate.length === 0) {
+      log(emit, session, "Graph updated");
+      return complete(session, emit);
+    }
+
     log(
       emit,
       session,
@@ -378,9 +423,9 @@ export async function runResearch(
         : "Validating relationships with Jev",
     );
     const excerpts = new Map(
-      uniqueRels.map((rel) => [rel.id, evidenceExcerpt(rel, documents)]),
+      toValidate.map((rel) => [rel.id, evidenceExcerpt(rel, documents)]),
     );
-    const batches = chunk(uniqueRels, 4);
+    const batches = chunk(toValidate, 4);
     const classifiedBatches = await Promise.all(
       batches.map((batch) =>
         classifyClaims(

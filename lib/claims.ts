@@ -3,16 +3,20 @@ import type {
   Entity,
   EpisodeTime,
   EvidenceRecord,
+  ReasoningChain,
   Relationship,
+  RelationshipBasis,
   RelationshipStatus,
   SearchResult,
   SessionView,
   Validation,
+  ValidatorModel,
 } from "./types";
-import { normalizeRelationshipStatus } from "./types";
+import { normalizeRelationshipBasis, normalizeRelationshipStatus } from "./types";
 
 export type DecisionFilter = "ALL" | "CONTRADICTED" | "UNCERTAIN" | "PENDING" | "SUPPORTED";
 export type StatusFilter = "ALL" | RelationshipStatus;
+export type BasisFilter = "ALL" | RelationshipBasis;
 
 export type ClaimRow = {
   relationshipId: string;
@@ -25,7 +29,7 @@ export type ClaimRow = {
   status: RelationshipStatus;
   decision: string;
   confidence?: number;
-  model: "jev" | "mock";
+  model: ValidatorModel;
   snippet: string;
   url?: string;
   extraUrls: string[];
@@ -33,6 +37,9 @@ export type ClaimRow = {
   publishedAt?: string;
   time?: EpisodeTime;
   when: string;
+  basis: RelationshipBasis;
+  reasoning?: ReasoningChain;
+  unresolved?: boolean;
 };
 
 const RANK: Record<string, number> = {
@@ -84,6 +91,9 @@ export function buildClaimRows(view: {
       publishedAt: oldestPublished(stacked) || view.sources.find((source) => source.url === url)?.publishedAt,
       time: rel.time,
       when: formatEpisodeTime(rel.time),
+      basis: normalizeRelationshipBasis(rel.basis),
+      reasoning: rel.reasoning,
+      unresolved: rel.unresolved,
     } satisfies ClaimRow;
   });
 
@@ -124,14 +134,22 @@ export function statusCounts(rows: ClaimRow[]) {
   return counts;
 }
 
+export function basisCounts(rows: ClaimRow[]) {
+  const counts = { recorded: 0, extracted: 0, inferred: 0 };
+  for (const row of rows) counts[row.basis] += 1;
+  return counts;
+}
+
 export function filterClaimRows(
   rows: ClaimRow[],
   decision: DecisionFilter,
   status: StatusFilter = "ALL",
+  basis: BasisFilter = "ALL",
 ): ClaimRow[] {
   return rows.filter((row) => {
     if (decision !== "ALL" && row.decision !== decision) return false;
     if (status !== "ALL" && row.status !== status) return false;
+    if (basis !== "ALL" && row.basis !== basis) return false;
     return true;
   });
 }

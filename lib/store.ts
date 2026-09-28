@@ -253,6 +253,7 @@ async function loadSession(id: string): Promise<SessionRecord | undefined> {
         {
           ...rel,
           status: normalizeRelationshipStatus(rel.status),
+          basis: rel.basis ?? "extracted",
           time: parseEpisodeTime(rel.time),
         },
       ]),

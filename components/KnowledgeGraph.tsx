@@ -7,6 +7,7 @@ import {
   type Entity,
   type EntityType,
   type Relationship,
+  type RelationshipBasis,
   type Validation,
 } from "@/lib/types";
 import {
@@ -78,10 +79,17 @@ function GraphEdge(props: EdgeProps) {
     centerY: sourceGappedY + (targetGappedY - sourceGappedY) * step,
   });
   const decision = String(props.data?.decision ?? "PENDING");
+  const basis = String(props.data?.basis ?? "extracted");
   const focused = Boolean(props.data?.focused);
   const selected = Boolean(props.selected);
   const mark =
-    decision === "CONTRADICTED" ? "×" : decision === "UNCERTAIN" ? "?" : "";
+    basis === "inferred"
+      ? "~"
+      : decision === "CONTRADICTED"
+        ? "×"
+        : decision === "UNCERTAIN"
+          ? "?"
+          : "";
 
   return (
     <>
@@ -129,26 +137,31 @@ function edgeStyle(
   dimmed?: boolean,
   selected?: boolean,
   focused?: boolean,
+  basis?: RelationshipBasis,
 ) {
   const decision = validation?.decision ?? "PENDING";
   const color =
     selected || focused
       ? "var(--accent)"
-      : decision === "CONTRADICTED"
-        ? "var(--contradicted)"
-        : decision === "UNCERTAIN"
-          ? "var(--uncertain)"
-          : decision === "SUPPORTED"
-            ? "var(--supported)"
-            : "var(--handle)";
+      : basis === "inferred"
+        ? "var(--uncertain)"
+        : decision === "CONTRADICTED"
+          ? "var(--contradicted)"
+          : decision === "UNCERTAIN"
+            ? "var(--uncertain)"
+            : decision === "SUPPORTED" || basis === "recorded"
+              ? "var(--supported)"
+              : "var(--handle)";
   return {
     stroke: color,
     strokeDasharray:
-      decision === "CONTRADICTED"
-        ? "2 4"
-        : decision === "UNCERTAIN"
-          ? "6 4"
-          : undefined,
+      basis === "inferred"
+        ? "4 5"
+        : decision === "CONTRADICTED"
+          ? "2 4"
+          : decision === "UNCERTAIN"
+            ? "6 4"
+            : undefined,
     strokeWidth: selected ? 2.4 : focused ? 2 : 1.35,
     opacity: dimmed ? 0.18 : 0.95,
   };
@@ -226,6 +239,7 @@ function GraphInner({
       target: rel.target,
       type: "audit",
       label: rel.time ? `${rel.type} ${formatEpisodeTime(rel.time)}` : rel.type,
+      data: { basis: rel.basis ?? "extracted" },
     }));
     const placed = layoutGraph(rawNodes, rawEdges, "TB") as Node<EntityData>[];
     const lanes = edgeLanes(placed, rawEdges);
@@ -270,11 +284,14 @@ function GraphInner({
         const dimmed =
           !inNeighborhood ||
           (citedEdges.size > 0 && !citedEdges.has(edge.id) && !selected);
-        const style = edgeStyle(validation, dimmed, selected, focused);
+        const rel = relationships.find((item) => item.id === edge.id);
+        const basis = rel?.basis ?? "extracted";
+        const style = edgeStyle(validation, dimmed, selected, focused, basis);
         return {
           ...edge,
           data: {
             decision: validation?.decision ?? "PENDING",
+            basis,
             focused,
             sourceShift: Number(edge.data?.sourceShift ?? 0),
             targetShift: Number(edge.data?.targetShift ?? 0),
@@ -301,6 +318,7 @@ function GraphInner({
     selectedRelationshipId,
     setNodes,
     setEdges,
+    relationships,
   ]);
 
   const handleNodesChange = useCallback(

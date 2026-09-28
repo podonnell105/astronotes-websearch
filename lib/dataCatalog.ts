@@ -11,16 +11,30 @@ export const DATA_SOURCE_IDS = [
   "wayback",
   "patents",
   "sam",
+  "uk_parliament",
+  "uk_hansard",
+  "uk_interests",
+  "electoral_commission",
+  "contracts_finder",
+  "oireachtas",
+  "lobbying_ie",
+  "congress_gov",
+  "openfec",
+  "senate_lda",
+  "europarl",
+  "eu_transparency",
+  "ted",
 ] as const;
 
 export type DataSourceId = (typeof DATA_SOURCE_IDS)[number];
-export type AnalystRole = "pe" | "vc" | "biotech" | "govtech" | "custom";
+export type AnalystRole = "pe" | "vc" | "biotech" | "govtech" | "political" | "custom";
 
 export const ANALYST_ROLES: Array<Exclude<AnalystRole, "custom">> = [
   "pe",
   "vc",
   "biotech",
   "govtech",
+  "political",
 ];
 
 export const ROLE_LABELS: Record<AnalystRole, string> = {
@@ -28,6 +42,7 @@ export const ROLE_LABELS: Record<AnalystRole, string> = {
   vc: "VC",
   biotech: "Biotech",
   govtech: "Govtech",
+  political: "Political intelligence",
   custom: "Custom",
 };
 
@@ -35,7 +50,8 @@ export type DataSourceEnv =
   | "COMPANIES_HOUSE_API_KEY"
   | "PATENTSVIEW_API_KEY"
   | "SAM_API_KEY"
-  | "OPENSANCTIONS_API_KEY";
+  | "OPENSANCTIONS_API_KEY"
+  | "CONGRESS_GOV_API_KEY";
 
 export type DataSourceDef = {
   id: DataSourceId;
@@ -67,6 +83,24 @@ export const DATA_CATALOG: DataSourceDef[] = [
     needsEnv: "PATENTSVIEW_API_KEY",
   },
   { id: "sam", label: "SAM.gov", host: "sam.gov", needsEnv: "SAM_API_KEY" },
+  { id: "uk_parliament", label: "UK Parliament members", host: "parliament.uk" },
+  { id: "uk_hansard", label: "Hansard", host: "hansard.parliament.uk" },
+  { id: "uk_interests", label: "UK Register of Interests", host: "parliament.uk" },
+  { id: "electoral_commission", label: "Electoral Commission", host: "electoralcommission.org.uk" },
+  { id: "contracts_finder", label: "Contracts Finder / Find a Tender", host: "contractsfinder.service.gov.uk" },
+  { id: "oireachtas", label: "Houses of the Oireachtas", host: "oireachtas.ie" },
+  { id: "lobbying_ie", label: "lobbying.ie", host: "lobbying.ie" },
+  {
+    id: "congress_gov",
+    label: "Congress.gov",
+    host: "congress.gov",
+    needsEnv: "CONGRESS_GOV_API_KEY",
+  },
+  { id: "openfec", label: "FEC OpenFEC", host: "fec.gov" },
+  { id: "senate_lda", label: "Senate LDA lobbying", host: "senate.gov" },
+  { id: "europarl", label: "European Parliament", host: "europarl.europa.eu" },
+  { id: "eu_transparency", label: "EU Transparency Register", host: "europa.eu" },
+  { id: "ted", label: "TED procurement", host: "ted.europa.eu" },
 ];
 
 export const ROLE_PRESETS: Record<Exclude<AnalystRole, "custom">, DataSourceId[]> = {
@@ -81,6 +115,24 @@ export const ROLE_PRESETS: Record<Exclude<AnalystRole, "custom">, DataSourceId[]
     "opensanctions",
   ],
   govtech: ["usaspending", "sam", "edgar", "gleif", "opensanctions"],
+  political: [
+    "uk_parliament",
+    "uk_hansard",
+    "uk_interests",
+    "companies_house",
+    "gleif",
+    "electoral_commission",
+    "contracts_finder",
+    "oireachtas",
+    "lobbying_ie",
+    "congress_gov",
+    "openfec",
+    "senate_lda",
+    "usaspending",
+    "europarl",
+    "eu_transparency",
+    "ted",
+  ],
 };
 
 export const DEFAULT_AVAILABLE_SOURCES: DataSourceId[] = DATA_CATALOG.filter(
@@ -97,7 +149,7 @@ export function normalizeAnalystRole(value: unknown): AnalystRole {
   const raw = String(value ?? "")
     .trim()
     .toLowerCase();
-  if (raw === "pe" || raw === "vc" || raw === "biotech" || raw === "govtech") {
+  if (raw === "pe" || raw === "vc" || raw === "biotech" || raw === "govtech" || raw === "political") {
     return raw;
   }
   if (raw === "custom") return "custom";

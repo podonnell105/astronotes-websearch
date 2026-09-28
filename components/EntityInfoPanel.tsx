@@ -45,6 +45,13 @@ export function EntityInfoPanel({
           <div className="mt-1 truncate text-[14px] font-medium text-ink">
             {entity.name}
           </div>
+          {(entity.jurisdiction || (entity.identifiers?.length ?? 0) > 0) && (
+            <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+              {[entity.jurisdiction, ...(entity.identifiers ?? []).map((item) => `${item.scheme} ${item.value}`)]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+          )}
         </div>
         <button
           type="button"
@@ -113,10 +120,20 @@ export function EntityInfoPanel({
                       </>
                     )}
                   </div>
-                  {(rel.claim || rel.evidenceSnippet) && (
-                    <div className="entity-connection-fact">
-                      {rel.claim || rel.evidenceSnippet}
-                    </div>
+                  {(rel.claim || rel.evidenceSnippet || rel.basis) && (
+                    <>
+                      {(rel.claim || rel.evidenceSnippet) && (
+                        <div className="entity-connection-fact">
+                          {rel.claim || rel.evidenceSnippet}
+                        </div>
+                      )}
+                      {rel.basis && (
+                        <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+                          {rel.basis}
+                          {rel.unresolved ? " · unresolved name" : ""}
+                        </div>
+                      )}
+                    </>
                   )}
                 </button>
               );
@@ -127,7 +144,11 @@ export function EntityInfoPanel({
         {selected && (
           <div className="mt-4 border-t border-line pt-3">
             <div className="label mb-2">Evidence</div>
-            <p className="text-[12px] leading-5 text-muted">
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+              {(selected.basis ?? "extracted")}
+              {selected.provenance?.fieldPath ? ` · ${selected.provenance.fieldPath}` : ""}
+            </p>
+            <p className="mt-2 text-[12px] leading-5 text-muted">
               “{evidence?.snippet || selected.evidenceSnippet || selected.claim}”
             </p>
             {typeof evidence?.validation?.decision === "string" && (
@@ -136,7 +157,29 @@ export function EntityInfoPanel({
                 {typeof evidence.validation.confidence === "number"
                   ? ` · ${Math.round(evidence.validation.confidence * 100)}%`
                   : ""}
+                {evidence.validation.model === "register"
+                  ? " · register"
+                  : evidence.validation.model === "rule"
+                    ? " · rule"
+                    : evidence.validation.model === "jev"
+                      ? " · jev"
+                      : " · mock"}
               </p>
+            )}
+            {selected.basis === "inferred" && selected.reasoning && (
+              <div className="mt-3">
+                <div className="label mb-2">Reasoning</div>
+                <ol className="space-y-1 text-[12px] leading-5 text-muted">
+                  {selected.reasoning.steps.map((step) => (
+                    <li key={step.order}>
+                      {step.order}. {step.text}
+                    </li>
+                  ))}
+                </ol>
+                <p className="mt-2 text-[12px] leading-5 text-dim">
+                  {selected.reasoning.disclaimer}
+                </p>
+              </div>
             )}
             {(evidence?.sources.length
               ? evidence.sources

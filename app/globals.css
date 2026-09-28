@@ -607,6 +607,32 @@ html.light .pixel-compose-motif {
   color: var(--dim);
 }
 
+.claim-basis {
+  display: inline-block;
+  border: 1px solid var(--line);
+  padding: 1px 6px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.claim-basis--recorded {
+  border-color: var(--supported);
+  color: var(--supported);
+}
+
+.claim-basis--extracted {
+  color: var(--muted);
+}
+
+.claim-basis--inferred {
+  border-color: var(--uncertain);
+  color: var(--uncertain);
+}
+
 .claim-status {
   display: inline-block;
   border: 1px solid var(--line);

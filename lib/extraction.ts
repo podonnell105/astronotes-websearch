@@ -29,8 +29,8 @@ Return JSON:
   }]
 }
 
-Entity types: exactly one lowercase noun. Prefer: person, organization, company, technology, mission, location, product, spacecraft, concept, service, event, process. If none fit, still use a single noun (law, fund, school, cycle). Never use phrases or blanks.
-Relationship types: concise verbs such as partners_with, develops, owns, operates, funds, acquired, supplies, works_with, launches, uses, member_of, represents, educated_at, minister_of, born_in, lived_in, founded, cofounded, created, provides, explains, announced_for, contracts.
+Entity types: exactly one lowercase noun. Prefer: person, organization, company, office, legislation, sector, technology, mission, location, product, spacecraft, concept, service, event, process. If none fit, still use a single noun (law, fund, school, cycle). Never use phrases or blanks.
+Relationship types: concise verbs such as partners_with, develops, owns, operates, funds, acquired, supplies, works_with, launches, uses, member_of, represents, educated_at, minister_of, born_in, lived_in, founded, cofounded, created, provides, explains, announced_for, contracts, holds_office, declared_interest, officer_of, donated_to, lobbied_on, sponsored, voted_on, spoke_on, questioned, awarded_contract, classified_as.
 Every relationship MUST include status: exactly one of deployed, announced, unclear.
 - announced = press release, selection, award, "will build", or deploy-intent without evidence of operations
 - deployed = operating, launched, contracted delivery already in service, on-orbit, or on-surface, or a USASpending award record with amount and dates. Also use deployed for identity that already happened: cofounded, served as CEO, is a partner, graduated, chairs.
@@ -214,6 +214,7 @@ function normalizeExtraction(raw: unknown, existing: Entity[] = []): Extraction 
         sourceUrl: typeof r.sourceUrl === "string" ? r.sourceUrl : undefined,
         evidenceSnippet:
           typeof r.evidenceSnippet === "string" ? r.evidenceSnippet : undefined,
+        basis: "extracted",
         ...(time ? { time } : {}),
       });
     }
@@ -274,6 +275,7 @@ export function attachNewEntities(
       type,
       claim: `${entity.name} is related to ${anchor.name}`,
       status: "unclear",
+      basis: "extracted",
       sourceUrl: doc?.url,
       evidenceSnippet: doc
         ? (doc.snippet || (doc.text ?? "").slice(0, 240) || undefined)

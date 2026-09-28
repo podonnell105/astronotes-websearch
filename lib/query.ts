@@ -29,7 +29,8 @@ export async function queryGraph(
 When you mention a graph entity, wrap that mention as [[id|Display Name]] using the entity's exact id and name. Write normal sentences; the wrappers become in-text links to those nodes.
 Cite entities by name. entityIds and relationshipIds must be ids from the graph.
 Include every relationship you used as context in relationshipIds.
-If the graph cannot answer, say so.`,
+If the graph cannot answer, say so.
+Relationships may have basis recorded, extracted, or inferred. Inferred possible_overlap edges are possible connections with a reasoning chain — never describe them as proof of misconduct, a conflict of interest finding, or wrongdoing.`,
     user: JSON.stringify({ question, graph }),
   };
 

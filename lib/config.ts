@@ -50,6 +50,9 @@ export function dataSourceAvailability(): Record<DataSourceId, boolean> {
   const patents = Boolean(process.env.PATENTSVIEW_API_KEY?.trim());
   const sam = Boolean(process.env.SAM_API_KEY?.trim());
   const sanctions = Boolean(process.env.OPENSANCTIONS_API_KEY?.trim());
+  const congress = Boolean(
+    process.env.CONGRESS_GOV_API_KEY?.trim() || process.env.DATA_GOV_API_KEY?.trim(),
+  );
   const availability = {} as Record<DataSourceId, boolean>;
   for (const id of DATA_SOURCE_IDS) {
     const def = DATA_CATALOG.find((item) => item.id === id);
@@ -57,6 +60,7 @@ export function dataSourceAvailability(): Record<DataSourceId, boolean> {
     else if (def?.needsEnv === "PATENTSVIEW_API_KEY") availability[id] = patents;
     else if (def?.needsEnv === "SAM_API_KEY") availability[id] = sam;
     else if (def?.needsEnv === "OPENSANCTIONS_API_KEY") availability[id] = sanctions;
+    else if (def?.needsEnv === "CONGRESS_GOV_API_KEY") availability[id] = congress;
     else availability[id] = true;
   }
   return availability;

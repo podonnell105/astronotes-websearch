@@ -1,10 +1,11 @@
-import type { Entity } from "./types";
+import { matchingIdentifier, jurisdictionsCompatible } from "./ontology";
+import type { Entity, ValidatorModel } from "./types";
 import { slugify } from "./extraction";
 import { classifyEntityMatches, toValidation } from "./jev";
 
 export type EntityResolution = {
   entities: Entity[];
-  merges: { from: string; into: string; decision: string; model: "jev" | "mock" }[];
+  merges: { from: string; into: string; decision: string; model: ValidatorModel }[];
 };
 
 const STRIP_TOKENS = [
@@ -37,9 +38,26 @@ export async function resolveEntities(
   const unique = dedupeExact(incoming);
   const existingIds = new Set(existing.map((entity) => entity.id));
   const unresolved = unique.filter((entity) => !existingIds.has(entity.id));
-  const candidates = findMergeCandidates(unresolved, existing);
   const merges: EntityResolution["merges"] = [];
   const alias = new Map<string, string>();
+
+  const identified = findIdentifierMerges(unresolved, existing);
+  for (const pair of identified) {
+    const into = preferCanonical(pair[0], pair[1], existingIds);
+    const from = into.id === pair[0].id ? pair[1] : pair[0];
+    alias.set(from.id, into.id);
+    merges.push({
+      from: from.id,
+      into: into.id,
+      decision: "YES",
+      model: "mock",
+    });
+  }
+
+  const candidates = findMergeCandidates(
+    unresolved.filter((entity) => !alias.has(entity.id)),
+    existing,
+  ).filter(([left, right]) => !matchingIdentifier(left, right));
 
   const batches: [Entity, Entity][][] = [];
   for (let i = 0; i < candidates.length; i += MATCH_BATCH) {
@@ -119,6 +137,31 @@ function dedupeExact(entities: Entity[]): Entity[] {
   return [...byId.values()];
 }
 
+function findIdentifierMerges(
+  incoming: Entity[],
+  existing: Entity[],
+): [Entity, Entity][] {
+  const pairs: [Entity, Entity][] = [];
+  const seen = new Set<string>();
+  const remember = (a: Entity, b: Entity) => {
+    const key = [a.id, b.id].sort().join("::");
+    if (seen.has(key) || a.id === b.id) return;
+    seen.add(key);
+    pairs.push([a, b]);
+  };
+  for (let i = 0; i < incoming.length; i++) {
+    for (let j = i + 1; j < incoming.length; j++) {
+      if (matchingIdentifier(incoming[i], incoming[j])) remember(incoming[i], incoming[j]);
+    }
+  }
+  for (const incomingEntity of incoming) {
+    for (const known of existing) {
+      if (matchingIdentifier(incomingEntity, known)) remember(incomingEntity, known);
+    }
+  }
+  return pairs;
+}
+
 function findMergeCandidates(
   incoming: Entity[],
   existing: Entity[],
@@ -141,6 +184,8 @@ function findMergeCandidates(
 }
 
 function likelySame(a: Entity, b: Entity): boolean {
+  if (matchingIdentifier(a, b)) return true;
+  if (!jurisdictionsCompatible(a, b)) return false;
   const na = normalizeName(a.name);
   const nb = normalizeName(b.name);
   if (!na || !nb) return false;
@@ -163,6 +208,9 @@ function preferCanonical(a: Entity, b: Entity, existingIds: Set<string>): Entity
   if (existingIds.has(a.id) !== existingIds.has(b.id)) {
     return existingIds.has(a.id) ? a : b;
   }
+  const aIds = a.identifiers?.length ?? 0;
+  const bIds = b.identifiers?.length ?? 0;
+  if (aIds !== bIds) return aIds > bIds ? a : b;
   if (a.name.length !== b.name.length) {
     return a.name.length <= b.name.length ? a : b;
   }
